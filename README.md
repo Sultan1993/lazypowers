@@ -55,4 +55,4 @@ orchestrates them (`brainstorming`, `writing-plans`, `subagent-driven-developmen
 
 ## License
 
-See repository.
+[MIT](LICENSE)
