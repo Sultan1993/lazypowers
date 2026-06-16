@@ -49,9 +49,10 @@ Add `--skip-critics` to run the plain superpowers flow without the gated critics
 
 ### Requirements
 
-The `superpowers-extended-cc` skills must be installed and enabled — superlazy-cc
-orchestrates them (`brainstorming`, `writing-plans`, `subagent-driven-development`,
-`finishing-a-development-branch`) rather than reimplementing them.
+The [`superpowers-extended-cc`](https://github.com/pcvelz/superpowers) skills must
+be installed and enabled — superlazy-cc orchestrates them (`brainstorming`,
+`writing-plans`, `subagent-driven-development`, `finishing-a-development-branch`)
+rather than reimplementing them.
 
 ## License
 
