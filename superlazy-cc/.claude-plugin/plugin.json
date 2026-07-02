@@ -1,7 +1,7 @@
 {
   "name": "superlazy-cc",
   "description": "Gated, reviewed feature-build pipeline: brainstorming -> spec-critic -> writing-plans -> plan-critic -> execution -> code-critic, with a PreToolUse seam gate. Critics use WebSearch + Context7. Drives the superpowers-extended-cc skills (must be installed/enabled).",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "qrotux"
   },
