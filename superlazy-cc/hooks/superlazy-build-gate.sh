@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # superlazy-build-gate.sh — PreToolUse gate for the superlazy-build pipeline.
 # Denies advancing to the next superpowers stage until the prior critic's
-# marker exists. No-op outside a superlazy-build run.
+# marker exists. The run owned by THIS session is found by matching the
+# hook's session_id against .superlazy-build/*/session, skipping runs with
+# a terminal .done marker. No-op when this session owns no active run.
 set -euo pipefail
 
 input="$(cat)"
@@ -17,10 +19,24 @@ skill="$(printf '%s' "$input" | jq -r '.tool_input.skill // .tool_input.command 
 cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 [ -n "$cwd" ] && cd "$cwd" 2>/dev/null || true
 
-current_file=".superlazy-build/current"
-[ -f "$current_file" ] || { printf '{}'; exit 0; }   # not in a run -> allow
-run_id="$(cat "$current_file")"
-mdir=".superlazy-build/${run_id}"
+session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
+[ -n "$session_id" ] || { printf '{}'; exit 0; }
+
+# Active run bound to this session; newest dir mtime wins if several.
+# Run dirs without a `session` file and legacy `.superlazy-build/current`
+# pointers are ignored.
+mdir=""
+mdir_mtime=-1
+for d in .superlazy-build/*/; do
+  if [ ! -f "${d}session" ] || [ -f "${d}.done" ]; then continue; fi
+  [ "$(cat "${d}session" 2>/dev/null)" = "$session_id" ] || continue
+  mtime="$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null || echo 0)"
+  if [ "$mtime" -gt "$mdir_mtime" ]; then
+    mdir="${d%/}"
+    mdir_mtime="$mtime"
+  fi
+done
+[ -n "$mdir" ] || { printf '{}'; exit 0; }   # no active run in this session -> allow
 
 deny() {
   jq -n --arg r "$1" '{

@@ -24,20 +24,42 @@ exists — but you must still run the critics.
 - Optional `--serial` flag — opt out of wave parallelism: skip the
   parallel-ready plan override (Step 3) and the wave dispatch policy (Step 5).
 
+## Parallelism — one checkout, one run
+Parallel superlazy-build runs in a single checkout are FORBIDDEN at the git
+level: sessions share one working tree, so one session's `git checkout` lands
+the other session's commits on a foreign branch (observed live). Policy: a
+solo run may use a plain branch; parallel runs MUST each live in their own
+git worktree. The `session`/`.done` run markers fix only the gate hook — they
+do not make a shared working tree safe for git.
+
 ## Step 0 — Setup
 1. Choose a run id (slug of the topic), e.g. `superlazy-build-<topic>`.
-2. Initialize markers + gitignore:
+2. SKIP path: if `--skip-critics` OR the brief is clearly trivial (single-file,
+   sub-~30-line change), announce critics are skipped, do NOT create the run
+   directory (the gate hook is then a no-op), run the plain flow
+   (brainstorming -> writing-plans -> subagent-driven-development), and stop here.
+3. Mutex check — never hijack another session's run:
+   ```bash
+   d=.superlazy-build/<run-id>
+   [ -d "$d" ] && [ ! -f "$d/.done" ] && [ -f "$d/session" ] \
+     && [ "$(cat "$d/session")" != "$CLAUDE_CODE_SESSION_ID" ] \
+     && echo "BUSY" || echo "FREE"
+   ```
+   On BUSY: STOP loudly — tell the user this run is already active in another
+   session: wait for it to finish or pick a different slug. Do not proceed.
+   EXCEPTION: the user explicitly says they are continuing/resuming that run
+   in THIS session (chain/resume) — then proceed to step 4, which re-binds it.
+4. Initialize the run directory, bind it to this session, gitignore:
    ```bash
    mkdir -p .superlazy-build/<run-id>
-   echo "<run-id>" > .superlazy-build/current
+   echo "$CLAUDE_CODE_SESSION_ID" > .superlazy-build/<run-id>/session
    grep -qxF '.superlazy-build/' .gitignore 2>/dev/null || echo '.superlazy-build/' >> .gitignore
    ```
-3. Create three native seam-gate tasks: "SEAM 1: spec-critic",
+   The `echo` also handles re-binding: when continuing an existing run in a
+   new session, it overwrites `session` with this session's id — the gate hook
+   only honors runs bound to the CURRENT session.
+5. Create three native seam-gate tasks: "SEAM 1: spec-critic",
    "SEAM 2: plan-critic", "SEAM 3: code-critic".
-4. SKIP path: if `--skip-critics` OR the brief is clearly trivial (single-file,
-   sub-~30-line change), announce critics are skipped, `rm -f
-   .superlazy-build/current` (so the gate hook is a no-op), run the plain flow
-   (brainstorming -> writing-plans -> subagent-driven-development), and stop here.
 
 ## Step 1 — Brainstorm
 Invoke Skill `superpowers-extended-cc:brainstorming` with the brief.
@@ -129,7 +151,8 @@ Invoke Skill `superpowers-extended-cc:subagent-driven-development`.
 
 ## Step 7 — Finish
 Invoke Skill `superpowers-extended-cc:finishing-a-development-branch`.
-Then `rm -f .superlazy-build/current` (end run; gate returns to no-op).
+Then `touch .superlazy-build/<run-id>/.done` (terminal marker; the gate
+ignores finished runs).
 
 ## VERDICT parser (use at every seam)
 - VERDICT = first line matching `^VERDICT:`; value is the token after the colon.
