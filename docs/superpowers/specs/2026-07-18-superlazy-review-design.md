@@ -53,18 +53,24 @@ Auto-detected context (drives conformance checks):
 Both models review ALL selected dimensions — full redundancy is required for the
 agreement signal to exist.
 
-## Pipeline (Workflow-driven)
+## Pipeline (coordinator-driven)
 
-The `superlazy-review` skill is a thin launcher: parse args, resolve the diff /
-worktree / context, invoke the Workflow, then handle `--post`. The Workflow does:
+The `superlazy-review` skill instructs the coordinator (Claude Code, this
+session) to orchestrate directly. Rationale: the Workflow sandbox has no shell
+access, so it cannot run `codex exec`; rather than tunnel every Codex review
+through a throwaway relay subagent, the coordinator invokes Codex natively via
+`Bash(codex-critic.sh)` and Claude via the `Agent` tool. The skill parses args,
+resolves the diff / worktree / context, runs the pipeline below, then handles
+`--post`:
 
 1. **Resolve** — compute `BASE_SHA`/`HEAD_SHA`, ensure the worktree, gather
    context (plan/spec/PR body), emit the diff + changed-file list.
 2. **Review (parallel fan-out)** — `dimensions × {Claude, Codex}` review jobs.
-   - Claude side: a review subagent (`superlazy-review-critic` prompt).
-   - Codex side: `codex-critic.sh review` (same prompt, run on gpt-5.6-sol,
-     high reasoning effort, read-only sandbox).
-   - Every job returns the shared VERDICT/FINDINGS format.
+   - Claude side: the `Agent` tool with the `superlazy-review-critic` prompt,
+     structured-output schema enforced (parallel dispatch).
+   - Codex side: `Bash(codex-critic.sh review)` (same prompt, gpt-5.6-sol, high
+     reasoning effort, read-only sandbox), run in parallel.
+   - Every job returns the shared findings JSON schema (see below).
 3. **Bucket** — dedupe all result sets by `(file, line-proximity, claim overlap)`
    into **AGREED** (raised independently by both models) and **SINGLE** (one
    model only).
@@ -80,31 +86,54 @@ worktree / context, invoke the Workflow, then handle `--post`. The Workflow does
    (counts + top findings). In PR mode with `--post`: confirm, then post inline
    comments on surviving Critical/Important + one summary comment.
 
-## VERDICT / FINDINGS format (shared)
+## Findings interchange format (shared JSON)
 
-Reuse the existing critic format so Claude and Codex outputs are apples-to-apples:
+Both reviewers emit the SAME strict JSON so bucketing/refutation is programmatic
+(refinement over the spec's original prose VERDICT block — a text format is
+error-prone to parse for dedup). The Claude side enforces it via the `Agent`
+structured-output schema; the Codex prompt demands "output ONLY minified JSON
+matching this schema" and the coordinator `JSON.parse`s stdout.
 
+```json
+{
+  "verdict": "pass" | "findings",
+  "summary": "one or two sentences",
+  "findings": [
+    {
+      "severity": "Critical" | "Important" | "Minor",
+      "dimension": "correctness|security|performance|tests|api-design|over-engineering",
+      "file": "path/relative/to/repo",
+      "line": 123,
+      "title": "short label",
+      "why": "reason + evidence",
+      "failure_scenario": "concrete inputs -> wrong output/crash",
+      "fix": "suggested fix"
+    }
+  ]
+}
 ```
-VERDICT: pass | findings
-SUMMARY: <one or two sentences>
-FINDINGS:
-- [Critical] <title> — <why + evidence> — <file:loc> — <failure scenario> — <fix>
-- [Important] <...>
-- [Minor] <...>
-```
 
-`NEEDS-HUMAN` verdict (wrapper couldn't run Codex) is never treated as a clean
-review — see Error handling.
+Refutation replies use `{ "refuted": true|false, "reason": "..." }`.
+If Codex is unavailable the wrapper prints `VERDICT: NEEDS-HUMAN` (non-JSON) —
+the coordinator treats an unparseable Codex reply as "Codex down," never as a
+clean review (see Error handling).
 
 ## Components / files (in the fork)
 
-- `skills/superlazy-review/SKILL.md` — the launcher + the Workflow script
-  (inline). Parses args, resolves diff/worktree/context, runs the pipeline,
-  handles `--post` with a confirm step.
+- `skills/superlazy-review/SKILL.md` — the coordinator instructions. Parses
+  args, resolves diff/worktree/context, runs the fan-out (`Agent` for Claude,
+  `Bash(codex-critic.sh review)` for Codex), then delegates bucket/refute-target/
+  rank/render to the node lib, handles `--post` with a confirm step.
+- `skills/superlazy-review/lib/review-synth.mjs` — pure, unit-tested node module
+  holding ALL deterministic logic: `findingKey`, `bucketFindings`,
+  `rankFindings`, `renderReport`, `renderDigest`, plus a CLI entry
+  (`node review-synth.mjs <in.json> <out-dir>`).
+- `skills/superlazy-review/lib/review-synth.test.mjs` — `node --test` unit tests.
 - `agents/superlazy-review-critic.md` — the shared **plan-agnostic** review
   prompt: the six dimensions + an optional conformance section that activates
-  only when a plan/spec/PR-intent is supplied. Used by the Claude subagent AND
-  read by `codex-critic.sh` for the Codex side (symmetric).
+  only when a plan/spec/PR-intent is supplied. Used by the Claude `Agent` side
+  AND read by `codex-critic.sh` for the Codex side (symmetric). Emits the
+  findings JSON above.
 - `scripts/codex-critic.sh` — **reused unchanged**: it already resolves
   `agents/superlazy-${critic}-critic.md`, so `codex-critic.sh review` reads
   `superlazy-review-critic.md`. Same model (gpt-5.6-sol) / effort (high) /
