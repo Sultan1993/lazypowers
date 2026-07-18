@@ -18,6 +18,9 @@ critic="${1:?usage: codex-critic.sh <spec|plan|code>}"
 # Override per-run with CODEX_CRITIC_MODEL; set it to empty ("") to let Codex use
 # whatever your account default is (safest if the id changes in a future release).
 MODEL="${CODEX_CRITIC_MODEL-gpt-5.6-sol}"
+# Reasoning effort. Codex defaults critics to "low"; adversarial review is worth
+# more thinking, so default "high". Override CODEX_CRITIC_EFFORT (minimal|low|medium|high).
+EFFORT="${CODEX_CRITIC_EFFORT:-high}"
 # -----------------------------------------------------------------------------
 
 fail() { echo "VERDICT: NEEDS-HUMAN"; echo "codex-critic: $1" >&2; exit 2; }
@@ -44,7 +47,7 @@ exact format specified above — no preamble, no text after it."
 # Read-only sandbox: Codex may read the repo/spec/plan/diff but never edit.
 # Empty MODEL -> omit -m so Codex uses the account default.
 if [ -n "$MODEL" ]; then
-  exec codex exec -s read-only -m "$MODEL" "$prompt"
+  exec codex exec -s read-only -c model_reasoning_effort="$EFFORT" -m "$MODEL" "$prompt"
 else
-  exec codex exec -s read-only "$prompt"
+  exec codex exec -s read-only -c model_reasoning_effort="$EFFORT" "$prompt"
 fi
