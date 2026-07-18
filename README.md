@@ -71,5 +71,6 @@ Usage:
 - `superlazy-review` — review the current branch vs its base.
 - `superlazy-review <PR#>` — review a GitHub PR (via gh).
 - Flags: `--base <ref>`, `--post` (post inline PR comments, opt-in), `--serial`, `--dimensions correctness,security,...`.
+- Model flags (independent per side): `--claude-model <sonnet|opus|haiku>` and `--codex-model <id>`. Example — Sonnet reviewing on the Claude side, Sol on the Codex side: `superlazy-review --claude-model sonnet`.
 
-Reviewers run on Claude (opus) + Codex (gpt-5.6-sol, high reasoning effort, read-only). Requires the `codex` CLI installed and `codex login`.
+Reviewers run on Claude (opus by default) + Codex (gpt-5.6-sol, high reasoning effort, read-only), each side overridable via the model flags above. Requires the `codex` CLI installed and `codex login`.
