@@ -12,10 +12,12 @@ set -euo pipefail
 critic="${1:?usage: codex-critic.sh <spec|plan|code>}"
 
 # --- model config (EDIT HERE) ------------------------------------------------
-# Codex model the critics run on. Override per-run with CODEX_CRITIC_MODEL.
-# NOTE: if "sol" is a Codex *profile* (defined in ~/.codex/config.toml) rather
-# than a model id, swap `-m "$MODEL"` for `--profile "$MODEL"` in the call below.
-MODEL="${CODEX_CRITIC_MODEL:-sol}"
+# Codex model the critics run on. "gpt-5.6-sol" ("Sol") is the current default
+# on a ChatGPT-account Codex and is verified working. The bare id "sol" and
+# "gpt-5-codex" are NOT accepted on ChatGPT accounts.
+# Override per-run with CODEX_CRITIC_MODEL; set it to empty ("") to let Codex use
+# whatever your account default is (safest if the id changes in a future release).
+MODEL="${CODEX_CRITIC_MODEL-gpt-5.6-sol}"
 # -----------------------------------------------------------------------------
 
 fail() { echo "VERDICT: NEEDS-HUMAN"; echo "codex-critic: $1" >&2; exit 2; }
@@ -40,5 +42,9 @@ review yourself. Do NOT modify any files. Output ONLY the VERDICT block in the
 exact format specified above — no preamble, no text after it."
 
 # Read-only sandbox: Codex may read the repo/spec/plan/diff but never edit.
-# (Verify flags with `codex exec --help`; -s/--sandbox and -m/--model are current.)
-exec codex exec -s read-only -m "$MODEL" "$prompt"
+# Empty MODEL -> omit -m so Codex uses the account default.
+if [ -n "$MODEL" ]; then
+  exec codex exec -s read-only -m "$MODEL" "$prompt"
+else
+  exec codex exec -s read-only "$prompt"
+fi

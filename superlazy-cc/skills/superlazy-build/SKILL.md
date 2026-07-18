@@ -34,7 +34,8 @@ CTX
 ```
 - Read-only: the wrapper runs `codex exec -s read-only`, so Codex reads the
   spec/plan/diff/repo but never edits. All FIXING stays with the coordinator.
-- Model: `CODEX_CRITIC_MODEL` env var (default `sol`); edit the wrapper to change.
+- Model: `CODEX_CRITIC_MODEL` env var (default `gpt-5.6-sol`, i.e. "Sol"); set it
+  empty to use the Codex account default, or edit the wrapper.
 - Requires the `codex` CLI installed + authenticated (`codex login`).
 - Crafted context only — never pipe this session's history.
 - If the wrapper emits `VERDICT: NEEDS-HUMAN` (codex missing/misconfigured),
