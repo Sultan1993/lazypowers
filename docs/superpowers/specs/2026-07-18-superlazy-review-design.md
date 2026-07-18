@@ -65,19 +65,22 @@ resolves the diff / worktree / context, runs the pipeline below, then handles
 
 1. **Resolve** — compute `BASE_SHA`/`HEAD_SHA`, ensure the worktree, gather
    context (plan/spec/PR body), emit the diff + changed-file list.
-2. **Review (parallel fan-out)** — `dimensions × {Claude, Codex}` review jobs.
+2. **Review (two parallel jobs)** — each model reviews the whole diff across all
+   selected dimensions in ONE pass (findings carry a `dimension` tag), run
+   concurrently. (Two comprehensive reviews, not 12 per-dimension calls — far
+   leaner, same cross-model signal since findings are dimension-tagged.)
    - Claude side: the `Agent` tool with the `superlazy-review-critic` prompt,
-     structured-output schema enforced (parallel dispatch).
-   - Codex side: `Bash(codex-critic.sh review)` (same prompt, gpt-5.6-sol, high
-     reasoning effort, read-only sandbox), run in parallel.
-   - Every job returns the shared findings JSON schema (see below).
-3. **Bucket** — dedupe all result sets by `(file, line-proximity, claim overlap)`
-   into **AGREED** (raised independently by both models) and **SINGLE** (one
-   model only).
+     structured-output schema enforced.
+   - Codex side: `Bash(codex-critic.sh review)` (gpt-5.6-sol, high reasoning
+     effort, read-only sandbox), run in the worktree.
+   - Each returns the findings JSON schema (see below).
+3. **Bucket** — dedupe the two findings sets by `(file, dimension, line-
+   proximity)` into **AGREED** (raised independently by both models) and
+   **SINGLE** (one model only).
 4. **Cross-refute (parallel, SINGLE only)** — hand each single-model finding to
-   the *other* model, prompted to refute, default-refuted-if-uncertain. It
-   survives only if not refuted. AGREED findings skip this step (already
-   corroborated).
+   the *other* model using the `superlazy-refute-critic` prompt (Codex via
+   `codex-critic.sh refute`, Claude via `Agent`), default-refuted-if-uncertain.
+   It survives only if not refuted. AGREED findings skip this step.
 5. **Synthesize** — final set = `AGREED ∪ SINGLE-survivors`, ranked by
    severity (Critical > Important > Minor) → agreement (both > one) → dimension.
    Each entry carries: title, severity, `file:loc`, failure scenario, suggested
@@ -134,6 +137,9 @@ clean review (see Error handling).
   only when a plan/spec/PR-intent is supplied. Used by the Claude `Agent` side
   AND read by `codex-critic.sh` for the Codex side (symmetric). Emits the
   findings JSON above.
+- `agents/superlazy-refute-critic.md` — the refutation prompt: given one finding
+  + the diff, return `{refuted, reason}` (default refuted-if-uncertain). Used by
+  the *other* model for each SINGLE finding. `codex-critic.sh refute` resolves it.
 - `scripts/codex-critic.sh` — **reused unchanged**: it already resolves
   `agents/superlazy-${critic}-critic.md`, so `codex-critic.sh review` reads
   `superlazy-review-critic.md`. Same model (gpt-5.6-sol) / effort (high) /
