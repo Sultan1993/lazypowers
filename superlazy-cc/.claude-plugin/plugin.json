@@ -1,7 +1,7 @@
 {
   "name": "superlazy-cc",
-  "description": "Gated, reviewed feature-build pipeline: brainstorming -> spec-critic -> writing-plans -> plan-critic -> execution -> code-critic, with a PreToolUse seam gate. Critics run on OpenAI Codex (codex exec, read-only) instead of Claude subagents. Drives the superpowers-extended-cc skills (must be installed/enabled).",
-  "version": "1.3.0",
+  "description": "Gated, reviewed feature-build pipeline: brainstorming -> spec-critic -> writing-plans -> plan-critic -> execution -> code-critic, with a PreToolUse seam gate. Critics run on OpenAI Codex (codex exec, read-only) instead of Claude subagents. Drives the superpowers-extended-cc skills (must be installed/enabled). Also ships superlazy-review: a two-model (Claude + Codex) adversarial code-review skill.",
+  "version": "1.4.0",
   "author": {
     "name": "Sultan1993 (fork of qrotux)"
   },
