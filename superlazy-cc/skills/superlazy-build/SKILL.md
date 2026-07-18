@@ -4,19 +4,41 @@ description: >
   Run the superpowers build pipeline (brainstorming -> writing-plans ->
   subagent-driven-development) with three adversarial critics gating each seam:
   superlazy-spec-critic, superlazy-plan-critic, superlazy-code-critic. Use when you want a reviewed,
-  gated feature build. Plans are parallel-ready and executed in waves of
-  concurrent subagents. Accepts optional --skip-critics and --serial flags.
+  gated feature build. Critics run on OpenAI Codex (via codex exec), not Claude
+  subagents. Plans are parallel-ready and executed in waves of concurrent
+  subagents. Accepts optional --skip-critics and --serial flags.
 ---
 
 # superlazy-build — gated superpowers pipeline
 
 You are the COORDINATOR. Drive the existing superpowers skills as stages and
-dispatch a critic at each seam. Do NOT skip seams. A PreToolUse gate hook
-backstops you by blocking stage transitions until the prior critic's marker
-exists — but you must still run the critics.
+run a critic at each seam. Critics run on OpenAI Codex, NOT Claude subagents —
+never use the `Agent` tool for a critic (see **Codex critics** below). Do NOT
+skip seams. A PreToolUse gate hook backstops you by blocking stage transitions
+until the prior critic's marker exists — but you must still run the critics.
 
 ## Announce
-"Using superlazy-build to run a critic-gated build pipeline."
+"Using superlazy-build to run a critic-gated build pipeline (critics on Codex)."
+
+## Codex critics — how to run a seam
+Every critic (spec/plan/code) runs on Codex via a wrapper. At each seam, resolve
+the wrapper and pipe the crafted inputs to it on stdin; its stdout IS the VERDICT
+block you parse (see Parser). Do NOT use the `Agent` tool for critics.
+
+```bash
+WRAP=$(ls -d ~/.claude/plugins/cache/*/superlazy-cc/*/scripts/codex-critic.sh 2>/dev/null | sort -V | tail -1)
+"$WRAP" <spec|plan|code> <<'CTX'
+<the crafted inputs for this seam: doc paths, original brief, diff range
+ (BASE_SHA/HEAD_SHA for code), and (re-review) what changed>
+CTX
+```
+- Read-only: the wrapper runs `codex exec -s read-only`, so Codex reads the
+  spec/plan/diff/repo but never edits. All FIXING stays with the coordinator.
+- Model: `CODEX_CRITIC_MODEL` env var (default `sol`); edit the wrapper to change.
+- Requires the `codex` CLI installed + authenticated (`codex login`).
+- Crafted context only — never pipe this session's history.
+- If the wrapper emits `VERDICT: NEEDS-HUMAN` (codex missing/misconfigured),
+  surface its stderr to the user and STOP; do not silently clear the seam.
 
 ## Inputs
 - The user's brief (everything after the skill name).
@@ -67,9 +89,9 @@ OVERRIDE: brainstorming ends by trying to invoke writing-plans. Do NOT let it.
 When the design spec is written and user-approved, RETURN HERE for SEAM 1.
 
 ## Step 2 — SEAM 1: spec-critic (SURFACE, do not auto-fix)
-1. Dispatch the `Agent` tool, subagent_type `superlazy-spec-critic`, with ONLY: the
-   spec doc path, the user's original brief verbatim, and (re-review) what
-   changed. Never include this session's history.
+1. Run the Codex critic `"$WRAP" spec` (see **Codex critics** above). Pipe ONLY:
+   the spec doc path, the user's original brief verbatim, and (re-review) what
+   changed. Never include this session's history. Its stdout is the VERDICT block.
 2. Parse the VERDICT block (see Parser below).
 3. Act:
    - pass -> record Minor to the run report; `touch
@@ -100,8 +122,9 @@ OVERRIDE — the plan must be PARALLEL-READY (skip if `--serial`):
   compile/test runs are deferred to the barrier.
 
 ## Step 4 — SEAM 2: plan-critic (AUTO-FIX, bounded)
-1. Dispatch `Agent` subagent_type `superlazy-plan-critic` with: plan doc path, spec doc
-   path, (re-review) what changed. Crafted context only.
+1. Run the Codex critic `"$WRAP" plan` (see **Codex critics** above), piping: plan
+   doc path, spec doc path, (re-review) what changed. Crafted context only. Its
+   stdout is the VERDICT block.
 2. Parse the VERDICT block.
 3. Act:
    - pass -> `touch .superlazy-build/<run-id>/plan-critic.passed`; go to Step 5.
@@ -139,8 +162,9 @@ Invoke Skill `superpowers-extended-cc:subagent-driven-development`.
   If unsure of the parent, use the branch the worktree was created from.
 
 ## Step 6 — SEAM 3: code-critic (AUTO-FIX, bounded)
-1. Dispatch `Agent` subagent_type `superlazy-code-critic` with: worktree path,
-   BASE_SHA, HEAD_SHA, plan doc path, spec doc path, (re-review) what changed.
+1. Run the Codex critic `"$WRAP" code` (see **Codex critics** above), piping:
+   worktree path, BASE_SHA, HEAD_SHA, plan doc path, spec doc path, (re-review)
+   what changed. Its stdout is the VERDICT block.
 2. Parse the VERDICT block.
 3. Act:
    - pass -> go to Step 7.
@@ -156,7 +180,10 @@ ignores finished runs).
 
 ## VERDICT parser (use at every seam)
 - VERDICT = first line matching `^VERDICT:`; value is the token after the colon.
+- VERDICT token `NEEDS-HUMAN` (the wrapper couldn't run Codex — missing CLI,
+  bad model, no prompt file) is NEVER a pass regardless of counts: surface the
+  wrapper's stderr and STOP the seam. Fix Codex, then re-run.
 - Critical count = lines matching `^- \[Critical\]`. Important = `^- \[Important\]`.
-- pass-gate = (Critical == 0 AND Important == 0). The agent's self-reported
-  VERDICT token is advisory; the COUNTS are authoritative.
+- pass-gate = (VERDICT != NEEDS-HUMAN AND Critical == 0 AND Important == 0). The
+  self-reported VERDICT token is otherwise advisory; the COUNTS are authoritative.
 - Garbled/missing VERDICT line -> NEEDS-HUMAN: show raw output, ask how to proceed.
