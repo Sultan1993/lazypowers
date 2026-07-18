@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # codex-critic.sh — run a superlazy critic on OpenAI Codex instead of a Claude subagent.
 #
-# Usage:  codex-critic.sh <spec|plan|code>     (crafted inputs piped on stdin)
+# Usage:  codex-critic.sh <spec|plan|code|review|refute>   (crafted inputs piped on stdin)
 #
 # The critic's instruction body (including the exact VERDICT block spec) is read
 # from ../agents/superlazy-<critic>-critic.md with its YAML frontmatter stripped,
@@ -21,6 +21,11 @@ MODEL="${CODEX_CRITIC_MODEL-gpt-5.6-sol}"
 # Reasoning effort. Codex defaults critics to "low"; adversarial review is worth
 # more thinking, so default "high". Override CODEX_CRITIC_EFFORT (minimal|low|medium|high).
 EFFORT="${CODEX_CRITIC_EFFORT:-high}"
+# Live web search. Default ON — lets Codex verify current library APIs, CVEs, and
+# breaking changes as review evidence. Disable with CODEX_CRITIC_SEARCH=0 for
+# faster, offline critic runs. (Context7 MCP, if configured in ~/.codex, is
+# always available regardless of this switch.)
+case "${CODEX_CRITIC_SEARCH:-1}" in 0|false|no) SEARCH="" ;; *) SEARCH="--search" ;; esac
 # -----------------------------------------------------------------------------
 
 fail() { echo "VERDICT: NEEDS-HUMAN"; echo "codex-critic: $1" >&2; exit 2; }
@@ -46,8 +51,9 @@ exact format specified above — no preamble, no text after it."
 
 # Read-only sandbox: Codex may read the repo/spec/plan/diff but never edit.
 # Empty MODEL -> omit -m so Codex uses the account default.
+# NOTE: --search is a TOP-LEVEL codex flag, so it goes BEFORE `exec`.
 if [ -n "$MODEL" ]; then
-  exec codex exec -s read-only -c model_reasoning_effort="$EFFORT" -m "$MODEL" "$prompt"
+  exec codex $SEARCH exec -s read-only -c model_reasoning_effort="$EFFORT" -m "$MODEL" "$prompt"
 else
-  exec codex exec -s read-only -c model_reasoning_effort="$EFFORT" "$prompt"
+  exec codex $SEARCH exec -s read-only -c model_reasoning_effort="$EFFORT" "$prompt"
 fi

@@ -127,6 +127,11 @@ defaults are already sensible):
 |---|---|---|
 | `CODEX_CRITIC_MODEL` | `gpt-5.6-sol` | The "Sol" model. Set empty to use your Codex account default. On a ChatGPT-account Codex, `gpt-5-codex` is **not** available — `gpt-5.6-sol` is. |
 | `CODEX_CRITIC_EFFORT` | `high` | Reasoning effort (`minimal\|low\|medium\|high`). Adversarial review benefits from `high`. |
+| `CODEX_CRITIC_SEARCH` | `1` (on) | Live web search (`codex exec --search`) so critics verify current library APIs, CVEs, and breaking changes. Set `0` for faster/offline runs. |
+
+Reviewers also use the **Context7 MCP** (if configured in `~/.codex/config.toml`,
+which the setup above keeps) to pull library docs — independent of the web-search
+switch. Together, web search + Context7 make the Codex critics evidence-backed.
 
 The wrapper always runs Codex with `-s read-only`, so it can read the repo,
 diff, spec, and plan but never edits — all fixing stays with the coordinator.
