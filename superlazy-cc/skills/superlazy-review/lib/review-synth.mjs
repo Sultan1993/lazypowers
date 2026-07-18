@@ -81,7 +81,7 @@ export function renderReport(meta, ranked) {
   const out = [];
   out.push(`# superlazy-review — ${meta.target || 'diff'}`, '');
   out.push(`- Base \`${meta.base || '?'}\` → Head \`${meta.head || '?'}\``);
-  out.push(`- Reviewers: Claude (${meta.claudeModel || 'opus'}) + Codex (${meta.codexModel || 'gpt-5.6-sol'})`);
+  out.push(`- Reviewers: Claude (${meta.claudeModel || 'sonnet'}) + Codex (${meta.codexModel || 'gpt-5.6-sol'})`);
   if (meta.note) out.push(`- Note: ${meta.note}`);
   out.push(`- Findings: ${c.Critical} Critical, ${c.Important} Important, ${c.Minor} Minor`, '');
   if (!ranked.length) { out.push('_No surviving findings._'); return `${out.join('\n')}\n`; }

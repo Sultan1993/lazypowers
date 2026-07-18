@@ -73,4 +73,4 @@ Usage:
 - Flags: `--base <ref>`, `--post` (post inline PR comments, opt-in), `--serial`, `--dimensions correctness,security,...`.
 - Model flags (independent per side): `--claude-model <sonnet|opus|haiku>` and `--codex-model <id>`. Example — Sonnet reviewing on the Claude side, Sol on the Codex side: `superlazy-review --claude-model sonnet`.
 
-Reviewers run on Claude (opus by default) + Codex (gpt-5.6-sol, high reasoning effort, read-only), each side overridable via the model flags above. Requires the `codex` CLI installed and `codex login`.
+Reviewers run on Claude (sonnet by default; use `--claude-model opus` for the heaviest reviews) + Codex (gpt-5.6-sol, high reasoning effort, read-only), each side overridable via the model flags above. Requires the `codex` CLI installed and `codex login`.

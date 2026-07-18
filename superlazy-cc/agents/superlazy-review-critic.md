@@ -5,7 +5,7 @@ description: >
   dimensions and emits strict findings JSON. Plan-agnostic; adds conformance
   checks when a plan/spec/PR intent is supplied. Read-only.
 tools: Read, Grep, Glob, Bash, WebSearch, mcp__context7__resolve-library-id, mcp__context7__query-docs
-model: opus
+model: sonnet
 ---
 
 # superlazy-review critic
