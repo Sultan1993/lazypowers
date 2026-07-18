@@ -57,3 +57,20 @@ rather than reimplementing them.
 ## License
 
 [MIT](LICENSE)
+
+## superlazy-review — two-model code review
+
+`superlazy-review` reviews a diff with BOTH Claude and Codex/Sol independently, refutes each model's single-model findings with the other model, and emits a report ranked by severity + cross-model agreement. Advisory only — it never gates or merges. A two-model upgrade over the built-in single-model `/code-review`.
+
+Install (from this fork):
+
+    claude plugin marketplace add https://github.com/Sultan1993/lazypowers
+    claude plugin install superlazy-cc@lazypowers
+
+Usage:
+- `superlazy-review` — review the current branch vs its base.
+- `superlazy-review <PR#>` — review a GitHub PR (via gh).
+- Flags: `--base <ref>`, `--post` (post inline PR comments, opt-in), `--serial`, `--dimensions correctness,security,...`.
+- Model flags (independent per side): `--claude-model <sonnet|opus|haiku>` and `--codex-model <id>`. Example — Sonnet reviewing on the Claude side, Sol on the Codex side: `superlazy-review --claude-model sonnet`.
+
+Reviewers run on Claude (opus by default) + Codex (gpt-5.6-sol, high reasoning effort, read-only), each side overridable via the model flags above. Requires the `codex` CLI installed and `codex login`.

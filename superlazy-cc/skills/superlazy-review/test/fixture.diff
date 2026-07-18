@@ -1,0 +1,15 @@
+diff --git a/calc.js b/calc.js
+new file mode 100644
+index 0000000..cccbf5c
+--- /dev/null
++++ b/calc.js
+@@ -0,0 +1,9 @@
++// FIXTURE: the pct() division is the planted CRITICAL (no zero-divisor guard -> Infinity/NaN).
++// FIXTURE: the isBlank() == null line is the PLAUSIBLE-BUT-FALSE finding (== null is intentional/safe).
++export function pct(a, b) {
++  return (a / b * 100).toFixed(1); // real bug: b === 0 -> "Infinity"
++}
++export function isBlank(s) {
++  // eslint-disable-next-line eqeqeq
++  return s == null; // safe: == null intentionally matches null AND undefined
++}
