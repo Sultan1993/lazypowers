@@ -4,32 +4,32 @@
     {
       "id": 0,
       "subject": "Task 1: reviewer + refuter prompts",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Create the two shared prompt files that both models use, emitting strict JSON.\n\n**Files:**\n- Create: `superlazy-cc/agents/superlazy-review-critic.md`\n- Create: `superlazy-cc/agents/superlazy-refute-critic.md`\n\n**Acceptance Criteria:**\n- codex-critic.sh review returns parseable {verdict,summary,findings}\n- codex-critic.sh refute returns {refuted,reason}\n- both files register as subagent types (valid frontmatter)\n\n**Verify:** cd /Users/sultan/Development/lazypowers && printf 'WORKTREE: %s\\nBASE_SHA: HEAD~1\\nHEAD_SHA: HEAD\\nDIMENSIONS: correctness\\nCONTEXT:\\n(none)\\n' \"$(pwd)\" | ./superlazy-cc/scripts/codex-critic.sh review | node -e 'JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"))'\n\n```json:metadata\n{\"files\": [\"superlazy-cc/agents/superlazy-review-critic.md\",\"superlazy-cc/agents/superlazy-refute-critic.md\"], \"verifyCommand\": \"codex-critic.sh review returns parseable JSON\", \"acceptanceCriteria\": [\"review returns {verdict,summary,findings}\",\"refute returns {refuted,reason}\",\"frontmatter registers subagent types\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 1,
       "subject": "Task 2: synthesis lib + unit tests",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A pure node module with all deterministic logic (bucket/rank/refute-filter/render) + CLI, unit-tested, no model calls.\n\n**Files:**\n- Create: `superlazy-cc/skills/superlazy-review/lib/review-synth.mjs`\n- Create: `superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs`\n\n**Acceptance Criteria:**\n- bucketFindings agreement/single + stable ids\n- rankFindings severity>agreement>dimension\n- applyRefutations drops refuted singles keeps agreed\n- renderReport markdown shape\n- node --test passes\n\n**Verify:** node --test /Users/sultan/Development/lazypowers/superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs\n\n```json:metadata\n{\"files\": [\"superlazy-cc/skills/superlazy-review/lib/review-synth.mjs\",\"superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs\"], \"verifyCommand\": \"node --test /Users/sultan/Development/lazypowers/superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs\", \"acceptanceCriteria\": [\"bucket agreement/single + ids\",\"rank order\",\"refute filter\",\"render markdown\",\"node --test passes\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 2,
       "subject": "Task 3: SKILL.md coordinator pipeline",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [0, 1],
       "description": "**Goal:** Coordinator instructions running the full pipeline, wiring Task 1 prompts + Task 2 lib.\n\n**Files:**\n- Create: `superlazy-cc/skills/superlazy-review/SKILL.md`\n\n**Acceptance Criteria:**\n- parses local/PR/flags\n- parallel Claude (Agent superlazy-review-critic) + Codex (codex-critic.sh review)\n- bucket -> refute singles -> render\n- codex-down/empty-diff/no-base handling; --post confirm; worktree cleanup\n- references only existing files/agents\n\n**Verify:** for a in 'subagent_type: superlazy-review-critic' 'codex-critic.sh' 'review-synth.mjs bucket' 'superlazy-refute-critic' '--post' 'worktree remove'; do grep -q \"$a\" /Users/sultan/Development/lazypowers/superlazy-cc/skills/superlazy-review/SKILL.md || echo MISSING $a; done\n\n```json:metadata\n{\"files\": [\"superlazy-cc/skills/superlazy-review/SKILL.md\"], \"verifyCommand\": \"grep the SKILL.md for the required wiring tokens\", \"acceptanceCriteria\": [\"parses local/PR/flags\",\"parallel reviews\",\"bucket->refute->render\",\"error handling + --post confirm + cleanup\",\"references existing files\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 3,
       "subject": "Task 4: plugin.json version bump",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Bump plugin version + note the new skill.\n\n**Files:**\n- Modify: `superlazy-cc/.claude-plugin/plugin.json`\n\n**Acceptance Criteria:**\n- version 1.4.0\n- description mentions superlazy-review\n- valid JSON\n\n**Verify:** node -e 'const p=require(\"/Users/sultan/Development/lazypowers/superlazy-cc/.claude-plugin/plugin.json\"); if(p.version!==\"1.4.0\")throw 0; console.log(\"ok\")'\n\n```json:metadata\n{\"files\": [\"superlazy-cc/.claude-plugin/plugin.json\"], \"verifyCommand\": \"node -e require plugin.json; assert version 1.4.0\", \"acceptanceCriteria\": [\"version 1.4.0\",\"description mentions superlazy-review\",\"valid JSON\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
       "id": 4,
       "subject": "Task 5: golden fixture + acceptance + README",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [0, 1, 2],
       "description": "**Goal:** Golden fixture (planted Critical + plausible-false), acceptance doc, README section.\n\n**Files:**\n- Create: `superlazy-cc/skills/superlazy-review/test/fixture.diff`\n- Create: `superlazy-cc/skills/superlazy-review/test/acceptance.md`\n- Modify: `README.md`\n\n**Acceptance Criteria:**\n- fixture has planted Critical + plausible-but-false line\n- acceptance.md documents apply->run->expected (Critical survives, false refuted)\n- node --test on synth lib is the automated gate; live run is manual acceptance\n- README documents install + usage\n\n**Verify:** node --test /Users/sultan/Development/lazypowers/superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs && test -f /Users/sultan/Development/lazypowers/superlazy-cc/skills/superlazy-review/test/acceptance.md && grep -q superlazy-review /Users/sultan/Development/lazypowers/README.md && echo ok\n\n```json:metadata\n{\"files\": [\"superlazy-cc/skills/superlazy-review/test/fixture.diff\",\"superlazy-cc/skills/superlazy-review/test/acceptance.md\",\"README.md\"], \"verifyCommand\": \"node --test synth + acceptance.md exists + README mentions superlazy-review\", \"acceptanceCriteria\": [\"fixture planted Critical + false\",\"acceptance doc\",\"node --test gate\",\"README usage\"], \"modelTier\": \"standard\"}\n```"
     }
