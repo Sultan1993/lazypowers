@@ -4,11 +4,30 @@ import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 
 export const SEVERITY_RANK = { Critical: 0, Important: 1, Minor: 2 };
 export const DIMENSIONS = ['correctness', 'security', 'performance', 'tests', 'api-design', 'over-engineering'];
-const PROX = 15; // lines within which same-file+dimension findings are "the same"
+const PROX = 15; // lines within which same-file+dimension findings may be "the same"
+
+// salient (>3-char) words of a title, normalized
+function titleWords(t) {
+  return new Set(String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    .split(' ').filter((w) => w.length > 3));
+}
+
+// two findings describe the SAME defect: majority of the shorter title's salient words overlap
+function sameDefect(a, b) {
+  const A = titleWords(a.title);
+  const B = titleWords(b.title);
+  if (!A.size || !B.size) return false;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter += 1;
+  return inter / Math.min(A.size, B.size) >= 0.5;
+}
 
 function matches(a, b) {
   if (a.file !== b.file || a.dimension !== b.dimension) return false;
-  if (!a.line || !b.line) return true; // line unknown on either side -> match on file+dimension
+  // Semantic identity is required — location proximity alone is NOT enough, or two
+  // distinct defects at nearby lines would falsely merge and one would be dropped.
+  if (!sameDefect(a, b)) return false;
+  if (!a.line || !b.line) return true; // line unknown on a side -> title overlap carries it
   return Math.abs(a.line - b.line) <= PROX;
 }
 
