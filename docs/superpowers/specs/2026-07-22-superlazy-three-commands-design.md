@@ -1,6 +1,6 @@
 # superlazy-cc — three-command restructure — design spec
 
-Date: 2026-07-22 (rev 3 — marker-lifecycle fixes after spec-critic round 2 `targeted-fixes`, 3 Critical / 4 Important / 1 Minor)
+Date: 2026-07-22 (rev 4 — hash-bearing markers + run lifecycle after spec-critic round 3 `targeted-fixes`, 4 Critical / 3 Important / 1 Minor)
 Status: in review (Seam 1)
 Repo: `Sultan1993/lazypowers` (plugin `superlazy-cc`), version `1.5.0` → `1.6.0`
 
@@ -30,8 +30,9 @@ Enforced **by construction**:
   can only return content. (Tool restrictions bind the subagent, not the parent.)
 - In the intended flow, markers and the approval sidecar are created only by
   `codex-critic.sh`, and the sidecar only after both seams passed (ordering below).
-- The execution stage is blocked by the existing session-bound gate hook unless
-  `plan-critic.passed` exists in the session's run dir.
+- The execution stage is blocked by the session-bound gate hook unless
+  `plan-critic.passed` exists in the session's run dir — and, for hash-bearing
+  markers, unless the plan/tasks bytes still match what was approved.
 - Every task in an approved plan carries a valid `modelTier` — enforced by the
   deterministic `.tasks.json` schema validation `plan` mode runs before writing
   any approval (the upstream `pre-taskcreate-model-tier` harness gate also
@@ -67,28 +68,43 @@ Produces an approved, executable plan and stops.
    in the exact `.tasks.json` task format (each task's description carries the
    four section headers and the `json:metadata` fence with `files`, `modelTier`,
    `verifyCommand`, `acceptanceCriteria`). Task subjects ≤ 60 chars (upstream
-   6.2.x requirement). The coordinator writes `<plan>.md` and `<plan>.md.tasks.json`
-   and creates the native tasks. (`pre-taskcreate-model-tier` blocks any task
-   whose fence lacks a valid `modelTier` — this forces Fable's tier decisions all
-   the way through.)
+   6.2.x requirement). The plan markdown MUST begin with a
+   `Spec: <repo-root-relative path>` reference line (part of the drafter's
+   output template) — this is the spec resolver's fallback when no sidecar
+   exists. The coordinator writes `<plan>.md` and `<plan>.md.tasks.json` —
+   **native tasks are NOT created yet** (they are created only from
+   approved bytes, step 6b).
 6. **Seam 2:** coordinator runs `codex-critic.sh plan` (marker mode with
-   `PLAN_PATH`/`SPEC_PATH`). On a clean verdict **and** only if
-   `spec-critic.passed` already exists, the script writes the approval sidecar
-   and then `plan-critic.passed` (marker last — ordering below). Note: if the
-   user directs a *spec-level* change during this loop, the next `spec` run's
-   self-invalidation clears both markers and the loop correctly returns to
-   Seam 1. The plan-critic prompt includes
+   `PLAN_PATH`/`SPEC_PATH`). On a clean verdict, **and** only if the
+   `spec-critic.passed` marker exists AND its recorded `specHash` still matches
+   the current spec bytes (edit-between-seams rejection), the script writes the
+   approval sidecar and then `plan-critic.passed` (marker last — ordering
+   below). If the user directs a *spec-level* change during this loop, the next
+   `spec` run's self-invalidation clears both markers and the loop correctly
+   returns to Seam 1.
+6b. **Native tasks from approved bytes only:** after Seam 2 passes, the
+   coordinator creates the native tasks from the approved `.tasks.json`. (The
+   upstream `pre-taskcreate-model-tier` gate may also fire here — fail-open
+   defense-in-depth only; the schema guarantee came from `plan` mode.) Creating
+   tasks after approval means revised drafts can never leave stale native tasks
+   behind. The plan-critic prompt includes
    the **tier-assignment audit**: `frontier` where steps are complete = wasted
    money; `mechanical` where steps require judgment = silent quality loss;
    tie-break is spec completeness. Loop until the sidecar exists.
 7. Coordinator generates the HTML review page with `plan-viz.mjs` → writes it
-   next to the plan (`<plan>.md.html`). Publishing via the Artifact tool is
-   **best-effort**: attempt it; on unavailability or denial, print the local file
-   path instead. The local file is the contract; the URL is a convenience.
-8. Ends by **printing** the paths (spec, plan, tasks, sidecar, HTML/URL) and
-   stops. Ending-by-print (never `AskUserQuestion`) is a design rule of this
-   command — the upstream handoff guard may not be armed in this flow (it arms on
-   a `writing-plans` signal we never emit), so no enforcement is claimed for it.
+   next to the plan (`<plan>.md.html`) and prints its path. That local
+   self-contained file IS the deliverable. (Non-normative: a coordinator MAY
+   additionally publish it via the Artifact tool when that capability happens to
+   be available; nothing in this design requires, tests, or depends on it.)
+8. Ends by **printing** the paths (spec, plan, tasks, sidecar, HTML) and stops.
+   Standalone, the hard stop also **closes the run**: `touch
+   .superlazy-build/<run-id>/.done`. The run dir's job is done — approval
+   travels in the sidecar, and closing prevents the cross-session mutex from
+   false-BUSYing a later `build <plan>` in another session (see Run lifecycle).
+   Under `--continue` the run stays active for build to keep using in-session.
+   Ending-by-print (never `AskUserQuestion`) is a design rule of this command —
+   the upstream handoff guard may not be armed in this flow (it arms on a
+   `writing-plans` signal we never emit), so no enforcement is claimed for it.
 
 Internal `--continue` flag: suppresses the hard stop; used only when
 `superlazy-build` invokes brainstorm for its no-plan path.
@@ -102,7 +118,10 @@ Internal `--continue` flag: suppresses the hard stop; used only when
   carry forward the spec approval when the spec is unchanged, then one
   `codex-critic.sh plan` pass; if the spec changed too, the spec seam re-runs
   first (two Sol calls, still no Fable). Never brainstorm when `tasks.json`
-  exists.
+  exists. At execution start, build **materializes the native tasks from the
+  approved `.tasks.json`** if they do not already exist (plan-file invocations
+  arrive with no native tasks; `--continue` invocations already created them in
+  step 6b).
 - **Without a plan** (no path, or path without `.tasks.json`): invoke
   `superlazy-brainstorm --continue`, then execute without stopping.
 - Build **announces the branch it took** in one line ("Approved plan verified —
@@ -145,10 +164,27 @@ advisory; works on arbitrary targets.
 Modes: `spec` | `plan` | `code` (LLM critics), `verify` (non-LLM), `review` |
 `refute` (JSON modes — **byte-for-byte unchanged**, no marker logic).
 
+**Markers are hash-bearing JSON, not bare touch-files.** Same filenames as
+today (the gate's `-f` check keeps working), but the content records what was
+approved:
+- `spec-critic.passed` = `{"specPath": "...", "specHash": "<sha256>"}`
+- `plan-critic.passed` = `{"planPath": "...", "planHash": "<sha256>", "tasksHash": "<sha256>"}`
+- `code-critic.passed` = `{}` (nothing downstream consumes it)
+An approval is always bound to the exact bytes it approved; existence alone
+proves nothing to any consumer that can read the content.
+
+**Seam modes pin Sol.** For `spec`/`plan`/`code` the model is hard-pinned to
+`gpt-5.6-sol` — `CODEX_CRITIC_MODEL` is **ignored** for these modes (an
+inherited environment variable must not silently move the seams to another
+model; "Sol is the only critic" is a brief requirement, not a default).
+`review`/`refute` keep the env override — `superlazy-review`'s `--codex-model`
+flag depends on it. The test stub asserts the `-m` argument it receives.
+
 Critic modes (`spec`/`plan`/`code`):
 - Inputs: crafted context on stdin (unchanged). Env: `MARKER_DIR` (opt-in; absent
-  → behave exactly as today), plus for `plan` mode `PLAN_PATH` and `SPEC_PATH`
-  (repo-relative or absolute; stored in the sidecar as repo-root-relative via
+  → behave exactly as today), `SPEC_PATH` for `spec` mode (the file whose bytes
+  are being reviewed — recorded in the marker on pass), and `PLAN_PATH` +
+  `SPEC_PATH` for `plan` mode (paths stored repo-root-relative via
   `git rev-parse --show-toplevel`).
 - **Self-invalidation first.** With `MARKER_DIR` set, each critic mode BEGINS by
   deleting its own marker and everything downstream of it — `spec`: removes
@@ -167,15 +203,17 @@ Critic modes (`spec`/`plan`/`code`):
   zero counts are independent requirements and both are asserted (a malformed
   findings list can zero the counts; it cannot forge the token).
 - `plan` mode, on clean, additionally: (a) requires `spec-critic.passed` to
-  already exist in `$MARKER_DIR` — if absent, writes nothing, warns on stderr
-  (**seam-ordering enforcement**; the re-bless path supplies this marker via
-  `verify --spec-only`, below); (b) **validates `.tasks.json` deterministically**
-  before approving: every task parses, carries a `json:metadata` fence with
-  `modelTier` ∈ {mechanical, standard, frontier}, a `files` array, a non-blank
-  `verifyCommand`, and non-empty `acceptanceCriteria` — any violation = not
-  clean, nothing written, violations listed on stderr. (This validation is what
-  makes the tier guarantee real; the upstream harness gate is only
-  defense-in-depth, see Enforcement chain.)
+  exist in `$MARKER_DIR` **with `specHash` matching the sha256 of the current
+  `SPEC_PATH` bytes** — a bare/legacy marker or a hash mismatch means the spec
+  on disk is not the spec Seam 1 approved (edit-between-seams), so nothing is
+  written and the mismatch is reported on stderr (the re-bless path supplies a
+  valid marker via `verify --spec-only`, below); (b) **validates `.tasks.json`
+  deterministically** before approving: every task parses, carries a
+  `json:metadata` fence with `modelTier` ∈ {mechanical, standard, frontier}, a
+  `files` array, a non-blank `verifyCommand`, and non-empty
+  `acceptanceCriteria` — any violation = not clean, nothing written, violations
+  listed on stderr. (This validation is what makes the tier guarantee real; the
+  upstream harness gate is only defense-in-depth, see Enforcement chain.)
 - Write order on clean `plan`: **sidecar first, `plan-critic.passed` last**
   (each temp-file + `mv -f` rename). The marker is what authorizes execution
   in-session (the gate hook checks it), so it is the final commit; an
@@ -187,22 +225,27 @@ Critic modes (`spec`/`plan`/`code`):
   `VERDICT: NEEDS-HUMAN` on stdout, exit 2 — after self-invalidation.
 
 `verify <plan.md>` (non-LLM, no Codex call):
+- **Self-invalidates first**, like the critic modes: deletes both seam markers
+  from `$MARKER_DIR` before validating, so a failed verification can never
+  leave a previously-seeded approval standing in a reused run dir.
 - Derives `tasks = <plan.md>.tasks.json`, `sidecar = <plan.md>.approved.json`.
 - Checks: sidecar exists and parses; `planHash` = sha256 of the plan bytes;
   `tasksHash` = sha256 of the tasks bytes (hashed **separately** — no
   concatenation, so no boundary-shifting ambiguity); `specPath` exists;
   `specHash` matches its bytes. Any missing file, missing field, parse error, or
-  hash mismatch → **exit 3**, reason on stderr, nothing written (legacy/foreign
-  sidecars lacking fields are stale by definition).
-- On success: writes `spec-critic.passed` and `plan-critic.passed` into
-  `$MARKER_DIR` (temp + rename), prints `VERIFIED`, exit 0. Sidecar `commit` !=
-  `git rev-parse HEAD`: stderr warning, still exit 0 (drift warns, never blocks).
+  hash mismatch → **exit 3**, reason on stderr, nothing further written
+  (legacy/foreign sidecars lacking fields are stale by definition).
+- On success: writes hash-bearing `spec-critic.passed` and `plan-critic.passed`
+  (content derived from the validated sidecar) into `$MARKER_DIR` (temp +
+  rename), prints `VERIFIED`, exit 0. Sidecar `commit` != `git rev-parse HEAD`:
+  stderr warning, still exit 0 (drift warns, never blocks).
 - **`verify --spec-only <plan.md>`** — the partial mode that makes re-bless
-  possible: validates ONLY `specPath` + `specHash` against the existing sidecar
-  (ignoring the plan/tasks hashes, which are known-stale). On match it mints
-  `spec-critic.passed` alone — carrying the *spec's* approval forward from the
-  old sidecar because the spec bytes are provably the ones Sol approved — exit 0.
-  No sidecar, or spec missing/changed → exit 3, nothing written.
+  possible: deletes the spec marker, then validates ONLY `specPath` + `specHash`
+  against the existing sidecar (ignoring the plan/tasks hashes, which are
+  known-stale). On match it mints the hash-bearing `spec-critic.passed` alone —
+  carrying the *spec's* approval forward from the old sidecar because the spec
+  bytes are provably the ones Sol approved — exit 0. No sidecar, or spec
+  missing/changed → exit 3, nothing further written.
 - These modes exist so the fast path needs **no LLM call** while marker-writing
   stays inside the one trusted script.
 
@@ -242,13 +285,31 @@ residual counts. Tamper-evident, not tamper-proof (see threat model).
 | Plan seam passed, in order | sidecar then plan marker, written only when clean AND spec marker exists; marker last = execution authorized last | script |
 | Tier on every task | deterministic `.tasks.json` schema validation in `plan` mode — no valid `modelTier` on every task, no approval | script |
 | Cross-session approval | `verify` mode validates sidecar, mints session markers; `--spec-only` carries spec approval into re-bless | script |
-| Execution start | existing `superlazy-build-gate.sh` denies `Skill(subagent-driven-development|executing-plans)` without `plan-critic.passed` in the session run dir — unchanged, still fires (build still enters execution via that Skill call) | hook |
+| Execution start | `superlazy-build-gate.sh` (ours — **modified**) denies `Skill(subagent-driven-development|executing-plans)` without `plan-critic.passed` in the session run dir; when the marker is hash-bearing JSON it ALSO recomputes `planHash`/`tasksHash` against the files at `planPath` and denies on mismatch — post-approval edits are caught at the authorization point, closing the `--continue → execute` window. Bare/unparseable markers: existence-only check (legacy compat; fail-open per repo precedent) | hook |
 | Tier/dispatch harness gates | `pre-taskcreate-model-tier` and `pre-agent-model-routing` are **defense-in-depth only** — by design they fail open (ad-hoc tasks without a fence allowed, malformed fence JSON allowed, concrete `model` pins exempt, several routing states allow). The tier *guarantee* lives in the script validation above, not in these hooks. | hook (fail-open) |
 
 Corrected claim from rev 1: the gate hook does **not** cover Seams 1–2 in the
 brainstorm flow (brainstorm never invokes `writing-plans`, so that arm never
 fires). Seam ordering is enforced by the critic script instead, and the gate
-hook's real contribution is the execution boundary. No new hooks are added.
+hook's real contribution is the execution boundary — now strengthened with
+marker-hash validation. No NEW hooks are added; the one existing gate (part of
+this plugin) is modified.
+
+## Run-directory lifecycle
+
+The gate hook binds to the most-recent non-`.done` run dir owned by the current
+session, and the mutex BUSYs on a foreign session's active dir. The commands
+therefore manage runs as:
+
+| Flow | Run dir | At end |
+|---|---|---|
+| `superlazy-brainstorm` (standalone) | creates `<slug>` (mutex-checked as today) | **`.done` at the hard stop** — its job ends with the sidecar written; leaving it active would false-BUSY a later session's build |
+| `superlazy-brainstorm --continue` | creates `<slug>` | left **active**; build keeps using it in-session (markers present, gate armed), `.done` at build's finish as today |
+| `superlazy-build <plan>` | allocates a **fresh** run dir: `<plan-slug>` if free, else `<plan-slug>-2`, `-3`, … (a dir is "free" if absent or `.done`) — never rebinds a foreign active dir (mutex rules unchanged) | `verify`/re-bless mint markers into it; `.done` at finish |
+
+Same slug, brainstorm-today/build-tomorrow, different sessions: brainstorm's
+dir is `.done` (ignored by gate and mutex), build allocates fresh, `verify`
+re-mints from the sidecar. No false-BUSY, no ungated window.
 
 ## Plan resolution — how build classifies its argument
 
@@ -265,13 +326,20 @@ build <arg>
               │     ──► codex-critic.sh plan (one Sol call)
               │           ├─ clean ──► sidecar + plan marker ──► execute
               │           └─ findings ──► surface, do not execute
-              ├─ verify --spec-only fails, spec locatable (sidecar specPath or --spec)
+              ├─ verify --spec-only fails, spec locatable (resolver below)
               │     ──► spec changed too (or no prior approval to carry forward):
               │         codex-critic.sh spec, then codex-critic.sh plan (two Sol
               │         calls — still no Fable, no interactive brainstorm)
               └─ spec not locatable ──► STOP: report that re-bless needs the spec;
                     offer --spec <path> or a fresh brainstorm. Never guess.
 ```
+
+**Spec resolver** (deterministic order, first hit wins):
+1. the sidecar's `specPath` (when a sidecar exists);
+2. the plan doc's mandatory `Spec:` reference line (survives sidecar deletion —
+   this is why the drafter template requires it);
+3. an explicit `--spec <path>` argument;
+4. none of the above → STOP.
 
 The re-bless composition is why `plan` mode's spec-marker precondition is
 satisfiable in a fresh session: `verify --spec-only` supplies the spec marker
@@ -341,8 +409,12 @@ self-check and ≤60-char subject rule are adopted in the drafter's output forma
 
 **Modified**
 - `superlazy-cc/scripts/codex-critic.sh` — capture (drop `exec`), strict pass-token
-  parse, self-invalidation, tasks-schema validation, sidecar-then-marker writing,
-  `verify` + `verify --spec-only` modes
+  parse, self-invalidation, hash-bearing JSON markers, spec-marker matching in
+  `plan` mode, tasks-schema validation, seam-mode model pinning,
+  sidecar-then-marker writing, `verify` + `verify --spec-only` modes
+- `superlazy-cc/hooks/superlazy-build-gate.sh` — validate hash-bearing plan
+  markers (recompute + compare) before allowing execution; bare markers keep the
+  existence-only legacy behavior
 - `superlazy-cc/skills/superlazy-build/SKILL.md` — plan resolution, verify/re-bless
   paths, brainstorm delegation, OVERRIDE prose removal
 - `superlazy-cc/skills/superlazy-review/SKILL.md` — explicit model passing, opus default
@@ -377,14 +449,30 @@ variants), so marker logic is exercised without the API.
    written, violation on stderr
 8. no `MARKER_DIR` → stdout byte-identical to today's behavior; `review`/`refute`
    modes untouched
-9. `verify`: valid sidecar → both markers, exit 0, `VERIFIED`
-10. `verify`: flipped plan byte / flipped tasks byte (independently) → exit 3, nothing written
-11. `verify`: flipped spec byte / missing spec / legacy sidecar without `specPath` → exit 3
-12. `verify`: commit drift only → exit 0 + stderr warning
-13. `verify --spec-only`: spec unchanged vs sidecar → only `spec-critic.passed`
-    written, exit 0; spec changed or no sidecar → exit 3, nothing written
-14. re-bless composition (script-level): stale sidecar → `verify` exit 3 →
+9. **edit-between-seams rejection**: `spec` mode passes (marker carries
+   `specHash`), spec file is then edited, stubbed clean `plan` run → nothing
+   written, mismatch on stderr
+10. markers are hash-bearing JSON: after case 1/6, marker contents parse and
+    carry the correct hashes/paths
+11. seam-mode model pin: stub asserts `-m gpt-5.6-sol` for `spec`/`plan`/`code`
+    even with `CODEX_CRITIC_MODEL=other` exported; `review` mode still honors
+    the env var
+12. `verify`: valid sidecar → both hash-bearing markers, exit 0, `VERIFIED`
+13. `verify`: flipped plan byte / flipped tasks byte (independently) → exit 3;
+    **pre-seeded stale markers are gone afterward** (verify self-invalidation)
+14. `verify`: flipped spec byte / missing spec / legacy sidecar without `specPath` → exit 3
+15. `verify`: commit drift only → exit 0 + stderr warning
+16. `verify --spec-only`: spec unchanged vs sidecar → only `spec-critic.passed`
+    written, exit 0; spec changed or no sidecar → exit 3 and a pre-seeded spec
+    marker is gone
+17. re-bless composition (script-level): stale sidecar → `verify` exit 3 →
     `verify --spec-only` exit 0 → stubbed clean `plan` → fresh sidecar + both markers present
+
+`superlazy-build-gate.sh` (direct invocation with crafted stdin, like the
+existing hook tests):
+18. hash-bearing plan marker, files intact → allow
+19. hash-bearing plan marker, one plan/tasks byte flipped after approval → deny
+20. bare legacy marker → allow (existence-only compat)
 
 `plan-viz.test.mjs` (node:test, pure):
 fixtures for every detector — same-wave overlap, unknown `blockedBy`, cycle,
@@ -398,7 +486,9 @@ Static wiring (grep, matching repo precedent):
 - build SKILL contains: `verify`, re-bless branch, `--spec`, brainstorm
   delegation, announce lines; OVERRIDE prose absent
 - brainstorm SKILL contains: run-dir init, seam loops, sidecar path, plan-viz
-  invocation, print-and-stop ending, `--continue`
+  invocation, print-and-stop ending, `.done` at standalone stop, `--continue`,
+  tasks-after-approval ordering; drafter template contains the `Spec:`
+  reference line
 
 End-to-end (post-publish; the coordinator-level branches that greps cannot
 prove). One toy feature, then walk every deterministic plan-resolution branch:
@@ -407,8 +497,11 @@ prove). One toy feature, then walk every deterministic plan-resolution branch:
    execution, Seam 3 runs
 3. edit one plan byte → build → announce "re-blessing", exactly one Sol plan
    call, fresh sidecar, executes
-4. delete the sidecar → build → re-bless path (spec seam re-runs since
-   `--spec-only` has no sidecar to validate against), executes
+4. delete the sidecar → build → re-bless path: spec located via the plan doc's
+   `Spec:` line (resolver step 2), spec seam re-runs (no sidecar for
+   `--spec-only` to validate against), then plan seam, executes
+4b. brainstorm standalone in session A (`.done` written) → `build <plan>` in a
+   NEW session → no mutex BUSY, fresh run dir allocated, verify fast path works
 5. `superlazy-build` with a brief (no plan) → brainstorm runs inline, no hard
    stop, executes
 6. `superlazy-build --skip-critics` with a plan → executes with no run dir, no
@@ -423,7 +516,8 @@ deterministically is not reliable and is not attempted.
   model: drift, not malice).
 - No re-approval shortcut that bypasses Sol: any byte change Sol did not bless
   re-triggers the plan-critic. The only bypass is build's loud `--skip-critics`.
-- No new hooks. Script-side ordering + the existing execution gate suffice.
+- No NEW hooks. Script-side ordering + the existing execution gate (modified to
+  validate hash-bearing markers) suffice.
 - No parallel-draft-then-merge for Fable/Sol; Fable authors, Sol red-teams.
 - plan-viz renders and flags; it does not block anything.
 
