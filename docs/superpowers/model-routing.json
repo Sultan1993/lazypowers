@@ -1,0 +1,10 @@
+{
+  "mechanical": "sonnet",
+  "standard": "sonnet",
+  "frontier": "opus",
+  "effort": {
+    "mechanical": "low",
+    "standard": "medium",
+    "frontier": "inherit"
+  }
+}
