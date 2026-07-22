@@ -78,7 +78,8 @@ planHash/tasksHash/specPath/specHash; ok → write both markers from sidecar,
 `--spec-only`: rm spec marker; validate spec fields only; mint spec marker or
 exit 3. (4) Tests: PATH-prepend `tests/stubs/codex` (prints canned VERDICT from
 `$CODEX_STUB_VERDICT` file, records argv to `$CODEX_STUB_ARGS`); implement
-spec acceptance cases 1–17 incl. 7b divergence + model-pin assertion (case 11).
+spec acceptance cases 1–17 incl. 7b divergence, model-pin (case 11), and
+effort/search propagation (case 11b).
 **Acceptance Criteria:**
 - cases 1–17 of the spec's matrix pass via `bash superlazy-cc/tests/codex-critic.test.sh`
 - review mode stdout unchanged; seam modes ignore `CODEX_CRITIC_MODEL`
@@ -97,12 +98,13 @@ after the `-f` check, read the marker; empty/whitespace-only → allow (legacy);
 non-empty → must parse as JSON with planPath/planHash/tasksHash/specPath/specHash
 (jq), else DENY "corrupt approval marker"; recompute sha256 of the three files
 (paths relative to repo root; missing file → deny) and deny on any mismatch
-with a message naming the changed file; ALSO require the Skill invocation's
-tool_input text to contain the marker's planPath (absent/mismatch → deny —
-approved-A/executed-B). Keep all other behavior identical.
+with a message naming the changed file; ALSO parse the structured
+`planPath=<path>` argument from tool_input (never substring search),
+canonicalize, exact-equality vs marker planPath (absent/unparseable/unequal →
+deny — approved-A/executed-B incl. filename-extension and both-paths cases). Keep all other behavior identical.
 Tests: crafted-stdin invocations (existing repo test pattern): spec cases
 18–22 (intact→allow; plan/tasks/spec byte flip→deny each; empty legacy→allow;
-corrupt JSON / missing field→deny; invocation naming plan B or no plan→deny).
+corrupt JSON / missing field→deny; planPath= arg naming B / extending A's filename / missing → deny; exact A → allow).
 **Acceptance Criteria:** cases 18–21 pass; writing-plans arm untouched
 **Verify:** `bash superlazy-cc/tests/build-gate.test.sh`
 
@@ -209,7 +211,8 @@ plan: invoke Skill `superlazy-cc:superlazy-brainstorm` with `--continue`
 0.5 seam-tracker TaskCreate. Keep Steps 5–7 (execution, Seam 3 via
 `MARKER_DIR` so code marker writes, finish) intact including wave policy;
 execution materializes nothing — sdd owns TaskCreate, and the sdd Skill
-invocation MUST name the canonical plan path (gate binds it). Update VERDICT parser to
+invocation MUST carry the structured `planPath=<repo-relative>` token (gate
+parses + exact-matches it). Update VERDICT parser to
 pass-token semantics. Effort policy: first pass per seam high, re-reviews
 medium, user-exported `CODEX_CRITIC_EFFORT` wins.
 **Acceptance Criteria:** greps below; OVERRIDE prose gone; no TaskCreate

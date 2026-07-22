@@ -1,6 +1,6 @@
 # superlazy-cc — three-command restructure — design spec
 
-Date: 2026-07-22 (rev 7 — canonical-source binding after spec-critic round 6 `targeted-fixes`, 1 Critical)
+Date: 2026-07-22 (rev 8 — structured plan binding + effort-policy tests after spec-critic round 7 `targeted-fixes`, 1 Critical / 2 Important)
 Status: in review (Seam 1)
 Repo: `Sultan1993/lazypowers` (plugin `superlazy-cc`), version `1.5.0` → `1.6.0`
 
@@ -33,10 +33,12 @@ Enforced **by construction**:
 - The execution stage is blocked by the session-bound gate hook unless
   `plan-critic.passed` exists in the session's run dir — and, for hash-bearing
   markers, unless the plan, tasks, AND spec bytes still match what was approved.
-- Every task in an approved plan carries a valid `modelTier` — enforced by the
-  deterministic `.tasks.json` schema validation `plan` mode runs before writing
-  any approval (the upstream `pre-taskcreate-model-tier` harness gate also
-  exists but fails open by design, so it is defense-in-depth, not the guarantee).
+- Every task in an approved plan carries a valid `modelTier` — enforced by
+  `plan` mode's deterministic schema validation of the plan MARKDOWN's task
+  fences (the canonical TaskCreate source) plus the plan/tasks equivalence
+  check, run before any approval is written (the upstream
+  `pre-taskcreate-model-tier` harness gate also exists but fails open by
+  design — defense-in-depth, not the guarantee).
 
 Honest **conventions** (SKILL prose, not enforcement):
 - The coordinator faithfully transcribing Fable's returned content.
@@ -138,10 +140,12 @@ Internal `--continue` flag: suppresses the hard stop; used only when
 - Step 1's invocation of `superpowers-extended-cc:brainstorming` is replaced by
   `superlazy-brainstorm --continue`, deleting the OVERRIDE prose at current
   `SKILL.md:90` and `SKILL.md:109`.
-- **The sdd invocation names the approved plan.** When build invokes
-  `Skill(subagent-driven-development)`, the invocation args MUST contain the
-  canonical plan path — the gate compares it to the marker's `planPath` and
-  denies on absence or mismatch (approved-A/executed-B protection).
+- **The sdd invocation names the approved plan, structurally.** When build
+  invokes `Skill(subagent-driven-development)`, the invocation args MUST
+  include the token `planPath=<canonical repo-relative path>` — the gate
+  parses that exact argument (never substring search), canonicalizes, and
+  requires exact equality with the marker's `planPath`
+  (approved-A/executed-B protection).
 - **Seam 3** (`codex-critic.sh code`) always runs (except under `--skip-critics`).
   sdd's per-task Claude reviewers are kept (different layer, `standard` tier).
 - **`--skip-critics` — the one loud bypass, fully specified.** Announce
@@ -319,9 +323,9 @@ residual counts. Tamper-evident, not tamper-proof (see threat model).
 | No stale approvals | critic modes self-invalidate (delete own marker + downstream) before every run | script |
 | Spec seam passed | `spec-critic.passed` written by script only on `VERDICT: pass` + zero counts | script |
 | Plan seam passed, in order | sidecar then plan marker, written only when clean AND spec marker exists; marker last = execution authorized last | script |
-| Tier on every task | deterministic `.tasks.json` schema validation in `plan` mode — no valid `modelTier` on every task, no approval | script |
+| Tier on every task | deterministic schema validation of the plan MARKDOWN's task fences (canonical TaskCreate source) + plan/tasks equivalence, in `plan` mode — no valid `modelTier` on every task, no approval | script |
 | Cross-session approval | `verify` mode validates sidecar, mints session markers; `--spec-only` carries spec approval into re-bless | script |
-| Execution start | `superlazy-build-gate.sh` (ours — **modified**) denies `Skill(subagent-driven-development|executing-plans)` without `plan-critic.passed` in the session run dir; when the marker is JSON it (a) recomputes `planHash`/`tasksHash`/`specHash` against the files it names and denies on any mismatch, and (b) requires the Skill invocation's `tool_input` (args/prompt text) to CONTAIN the marker's `planPath` — an invocation that names a different plan, or none, is denied ("execution must name the approved plan"). A marker for plan A can therefore never authorize sdd consuming plan B. EMPTY markers: existence-only (legacy, no path binding). Non-empty malformed: **deny** | hook |
+| Execution start | `superlazy-build-gate.sh` (ours — **modified**) denies `Skill(subagent-driven-development|executing-plans)` without `plan-critic.passed` in the session run dir; when the marker is JSON it (a) recomputes `planHash`/`tasksHash`/`specHash` against the files it names and denies on any mismatch, and (b) requires the Skill invocation to carry ONE structured argument `planPath=<repo-relative path>`; the gate extracts it, canonicalizes both sides (strip leading `./`, collapse `//`), and compares for EXACT equality with the marker's `planPath` — absent argument, unparseable argument, or any inequality (including a path that merely contains the approved one) is denied. Substring presence is never sufficient. EMPTY markers: existence-only (legacy, no path binding). Non-empty malformed: **deny** | hook |
 | Tier/dispatch harness gates | `pre-taskcreate-model-tier` and `pre-agent-model-routing` are **defense-in-depth only** — by design they fail open (ad-hoc tasks without a fence allowed, malformed fence JSON allowed, concrete `model` pins exempt, several routing states allow). The tier *guarantee* lives in the script validation above, not in these hooks. | hook (fail-open) |
 
 Corrected claim from rev 1: the gate hook does **not** cover Seams 1–2 in the
@@ -506,6 +510,11 @@ variants), so marker logic is exercised without the API.
 11. seam-mode model pin: stub asserts `-m gpt-5.6-sol` for `spec`/`plan`/`code`
     even with `CODEX_CRITIC_MODEL=other` exported; `review` mode still honors
     the env var
+11b. effort/search propagation: stub argv shows
+    `-c model_reasoning_effort=high` with `CODEX_CRITIC_EFFORT=high`, `medium`
+    with `medium`, and `--search` present in both cases (and absent with
+    `CODEX_CRITIC_SEARCH=0`) — the first-pass-high / re-review-medium
+    SEQUENCING is coordinator prose, asserted by the SKILL grep below
 12. `verify`: valid sidecar → both hash-bearing markers, exit 0, `VERIFIED`
 13. `verify`: flipped plan byte / flipped tasks byte (independently) → exit 3;
     **pre-seeded stale markers are gone afterward** (verify self-invalidation)
@@ -525,8 +534,10 @@ existing hook tests):
 20. EMPTY legacy marker → allow (existence-only compat, no path binding)
 21. non-empty corrupt-JSON marker / JSON missing a required field → **deny**
     (no downgrade)
-22. hash-bearing marker for plan A, Skill invocation naming plan B (or naming
-    no plan at all) → **deny** (approved-A/executed-B)
+22. hash-bearing marker for plan A: invocation with `planPath=` naming plan B →
+    deny; naming a path that EXTENDS A's filename (`A-v2.md`) → deny;
+    invocation text containing BOTH paths but `planPath=` = B → deny; missing
+    `planPath=` argument entirely → deny; `planPath=` exactly A → allow
 
 `plan-viz.test.mjs` (node:test, pure):
 fixtures for every detector — same-wave overlap, unknown `blockedBy`, cycle,
@@ -543,9 +554,11 @@ Static wiring (grep, matching repo precedent):
   SKILLs)
 - brainstorm SKILL contains: run-dir init, the `CLAUDE_CODE_SUBAGENT_MODEL`
   preflight, seam loops, sidecar path, plan-viz invocation, print-and-stop
-  ending, `.done` at standalone stop, `--continue` — and NO `TaskCreate`
+  ending, `.done` at standalone stop, `--continue`, the effort policy (first
+  pass high / re-review medium / user export wins) — and NO `TaskCreate`
   (execution owns task creation); drafter template contains the `Spec:`
-  reference line and the exact `mcp__context7__*` tool names
+  reference line and the exact `mcp__context7__*` tool names; build SKILL
+  contains the `planPath=` invocation token
 
 End-to-end (post-publish; the coordinator-level branches that greps cannot
 prove). One toy feature, then walk every deterministic plan-resolution branch:
