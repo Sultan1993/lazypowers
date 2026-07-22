@@ -24,12 +24,13 @@ node lib. Do NOT use the Workflow tool (its sandbox can't run Codex).
   over-engineering).
 - Model flags (independent per side):
   - `--claude-model <sonnet|opus|haiku>` — model for the Claude reviewer/refuter
-    (default: the agent's own default, **sonnet**; pass `opus` for the heaviest
-    reviews). Pass it as the `Agent` tool's `model` on every review/refute dispatch.
+    (default: **opus**; pass `sonnet` for a cheaper review). Pass it as the
+    `Agent` tool's `model` on every review/refute dispatch.
   - `--codex-model <id>` — model for the Codex reviewer/refuter (default
     `gpt-5.6-sol`). Export as `CODEX_CRITIC_MODEL=<id>` before each
     `codex-critic.sh` call.
-  Example — Sonnet on Claude's side, Sol on Codex's: `--claude-model sonnet`
+  Example — Sonnet on Claude's side, Sol on Codex's: `--claude-model sonnet`;
+  default is Opus + Sol
   (leave `--codex-model` at its default).
 
 ## Step 0 — Resolve plugin paths
@@ -37,6 +38,7 @@ node lib. Do NOT use the Workflow tool (its sandbox can't run Codex).
 ROOT=$(ls -d ~/.claude/plugins/cache/*/superlazy-cc/*/ 2>/dev/null | sort -V | tail -1)
 WRAP="$ROOT/scripts/codex-critic.sh"
 SYNTH="$ROOT/skills/superlazy-review/lib/review-synth.mjs"
+export CODEX_CRITIC_EFFORT=high   # pin effort; don't rely on the wrapper default
 ```
 
 ## Step 1 — Resolve the change + run dir
@@ -79,11 +81,11 @@ CONTEXT:
 ```
 Run BOTH concurrently (issue the Bash and Agent calls in ONE message):
 - Codex: `cd "$WT" && printf '%s' "$INPUT" | ${CODEX_MODEL:+CODEX_CRITIC_MODEL="$CODEX_MODEL"} "$WRAP" review > "$RUN/codex.out" 2>"$RUN/codex.err"` (set `CODEX_MODEL` from `--codex-model` if given; else omit → wrapper default gpt-5.6-sol).
-- Claude: `Agent` tool, `subagent_type: superlazy-review-critic`, `prompt` = the INPUT block, and `model: <--claude-model>` if that flag was given (else omit → agent default sonnet). (Its system prompt is the reviewer; the INPUT is the assignment.)
+- Claude: `Agent` tool, `subagent_type: superlazy-review-critic`, `prompt` = the INPUT block, and `model: <--claude-model or opus>` — ALWAYS pass the model parameter explicitly (never rely on agent frontmatter resolution). (Its system prompt is the reviewer; the INPUT is the assignment.)
 Parse each result to `{verdict, summary, findings}`:
 - Extract the first `{`…`}` JSON object (strip any stray prose/fence) and `JSON.parse`.
 - If Codex output is not valid JSON (e.g. `VERDICT: NEEDS-HUMAN`) → Codex is DOWN: set `codex = {findings: []}` and `note = "single-model, unverified (Codex unavailable)"`. Do the same defensively for Claude.
-Write `$RUN/claude.json` and `$RUN/codex.json` (each `{findings:[...]}`), and `$RUN/meta.json` = `{target, base, head, claudeModel:<--claude-model or "sonnet">, codexModel:<--codex-model or "gpt-5.6-sol">, note}` (so the report header names the models actually used).
+Write `$RUN/claude.json` and `$RUN/codex.json` (each `{findings:[...]}`), and `$RUN/meta.json` = `{target, base, head, claudeModel:<--claude-model or "opus">, codexModel:<--codex-model or "gpt-5.6-sol">, note}` (so the report header names the models actually used).
 
 ## Step 4 — Bucket
 ```bash
@@ -100,7 +102,7 @@ HEAD_SHA: <HEAD>
 FINDING: <the finding JSON>
 ```
 - `raisedBy == ["claude"]` → Codex refutes: `cd "$WT" && printf '%s' "$REFUTE_INPUT" | ${CODEX_MODEL:+CODEX_CRITIC_MODEL="$CODEX_MODEL"} "$WRAP" refute`
-- `raisedBy == ["codex"]` → Claude refutes: `Agent` tool, `subagent_type: superlazy-refute-critic`, `prompt` = REFUTE_INPUT, and `model: <--claude-model>` if given.
+- `raisedBy == ["codex"]` → Claude refutes: `Agent` tool, `subagent_type: superlazy-refute-critic`, `prompt` = REFUTE_INPUT, and `model: <--claude-model or opus>` — always explicit.
 
 (Use the SAME `--claude-model` / `--codex-model` choices as Step 3 so each side is consistent between review and refute.)
 Run them in parallel (batch the calls). Parse each → `{refuted, reason}`.

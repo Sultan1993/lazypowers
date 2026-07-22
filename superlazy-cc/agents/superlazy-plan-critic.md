@@ -46,6 +46,14 @@ execution. Find gaps, placeholders, and inconsistencies.
      barrier tasks after the wave — else Important.
    - Test policy stated when wave tasks share a build unit (defer test runs
      to the barrier) — else Important; Minor if the plan is single-wave.
+8. Tier-assignment audit — every task's `modelTier` against its own Steps.
+   Tie-break: spec completeness wins — a task whose steps contain the complete
+   code is `mechanical` regardless of file count.
+   - `mechanical` where the steps require judgment the spec does not capture =
+     silent quality loss — Critical.
+   - `frontier` where the steps are already complete = wasted money — Important.
+   - Blanket assignments in either direction (everything mechanical to chase
+     cost, everything frontier to play safe) — Important.
 
 ## Output — EXACT format (your final message IS the return value)
 Before returning, RE-READ your output and confirm it matches exactly. The

@@ -27,6 +27,7 @@ block you parse (see Parser). Do NOT use the `Agent` tool for critics.
 
 ```bash
 WRAP=$(ls -d ~/.claude/plugins/cache/*/superlazy-cc/*/scripts/codex-critic.sh 2>/dev/null | sort -V | tail -1)
+export CODEX_CRITIC_EFFORT=high   # pin effort; don't rely on the wrapper default
 "$WRAP" <spec|plan|code> <<'CTX'
 <the crafted inputs for this seam: doc paths, original brief, diff range
  (BASE_SHA/HEAD_SHA for code), and (re-review) what changed>
