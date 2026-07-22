@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Fake codex CLI for codex-critic.sh tests.
+# Prints the canned VERDICT block from $CODEX_STUB_VERDICT (a file path) and
+# records its argv (one arg per line) to $CODEX_STUB_ARGS for assertions.
+if [ -n "${CODEX_STUB_ARGS:-}" ]; then
+  printf '%s\n' "$@" > "$CODEX_STUB_ARGS"
+fi
+if [ -n "${CODEX_STUB_VERDICT:-}" ] && [ -f "$CODEX_STUB_VERDICT" ]; then
+  cat "$CODEX_STUB_VERDICT"
+else
+  echo "VERDICT: pass"
+  echo "SUMMARY: stub default"
+  echo "FINDINGS:"
+  echo "- (none)"
+fi
