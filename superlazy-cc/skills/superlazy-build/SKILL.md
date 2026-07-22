@@ -58,8 +58,12 @@ still authors; no markers, no sidecar); with a plan, skip verify/re-bless.
 Execute, skip Seam 3, finish. State the consequence: nothing is approved, so a
 later non-skip build re-critiques. Skipping defers review; it cannot fake it.
 
-## Step 0.5 — Run dir (both branches, unless --skip-critics)
-Slug from the plan/topic. Mutex scans the WHOLE slug family
+## Step 0.5 — Run dir (PLAN branch only, unless --skip-critics)
+BRIEF branch: do NOT create a run dir here — `superlazy-brainstorm` owns
+run-dir creation (its Step 0), and under `--continue` it leaves that run
+ACTIVE; on return, build ADOPTS it (the newest same-session active run — the
+same one the gate hook selects). Exactly one run dir exists per brief build.
+PLAN branch: slug from the plan. Mutex scans the WHOLE slug family
 (`<slug>`, `<slug>-2`, …): any ACTIVE member owned by a foreign session →
 BUSY, stop loudly (never sidestep by suffixing). An active member owned by
 THIS session → rebind (overwrite its `session` file) and reuse. Otherwise
@@ -74,9 +78,11 @@ execution stage (sdd) is the single TaskCreate owner.
 
 ## Step B — No plan: brainstorm inline, then execute
 Invoke Skill `superlazy-cc:superlazy-brainstorm` with `--continue` and the
-brief. It gathers requirements with the user, has Fable draft spec + plan,
-runs Seams 1–2 (markers + sidecar land in this run dir), generates the HTML,
-and returns WITHOUT stopping. Then go to Step E.
+brief. It creates and owns the run dir, gathers requirements with the user,
+has Fable draft spec + plan, runs Seams 1–2 (markers + sidecar land in ITS
+run dir), generates the HTML, and returns WITHOUT stopping. Build then ADOPTS
+that run dir (newest same-session active) for Seam 3 and `.done`. Then go to
+Step E.
 
 ## Step P — Plan given: verify, else re-bless
 Announce which of these fires:

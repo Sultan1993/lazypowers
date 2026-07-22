@@ -83,6 +83,8 @@ expect "22d missing planPath= argument → deny" deny "run the plan at $PLAN ple
 expect "22e canonicalized exact match → allow" allow "planPath=./docs//plan.md"
 expect "22f duplicate planPath= tokens → deny (even if one matches)" deny "planPath=$PLAN planPath=docs/plan-v2.md"
 expect "22g duplicate identical tokens → deny (cardinality, not content)" deny "planPath=$PLAN planPath=$PLAN"
+expect "22h prefixed pseudo-token xplanPath= → deny (boundary required)" deny "xplanPath=$PLAN"
+expect "22i prefixed pseudo-token beside real one → allow (only one REAL token)" allow "xplanPath=docs/plan-v2.md planPath=$PLAN"
 
 # no marker at all → deny (pre-existing behavior)
 rm -f "$RUN/plan-critic.passed"

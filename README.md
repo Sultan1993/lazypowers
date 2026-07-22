@@ -58,21 +58,31 @@ not tamper-proof: the adversary is drift, not malice.
 
 ---
 
-## superlazy-build — gated build pipeline
+## superlazy-build — verify, (re-)bless, execute
 
-Drives the [`superpowers-extended-cc`](#requirements) skills as stages and
-dispatches an adversarial critic at each seam, so a feature can't advance until
-the prior critic's findings are cleared.
+Executes a Sol-approved plan, delegating planning to `superlazy-brainstorm`
+when none is given:
 
 ```
-brainstorming ──▶ SEAM 1 ──▶ writing-plans ──▶ SEAM 2 ──▶ execution ──▶ SEAM 3 ──▶ finish
-                spec-critic                  plan-critic              code-critic
-                (Codex)                       (Codex)                  (Codex)
+build <plan.md>:  verify sidecar ──▶ execute ──▶ SEAM 3 ──▶ finish
+                  (stale? one Sol re-bless — never a re-brainstorm)
+build <brief>:    superlazy-brainstorm --continue ──▶ execute ──▶ SEAM 3 ──▶ finish
 ```
 
-A `PreToolUse` hook backstops the coordinator: it **denies** the Skill call that
-would advance a stage until the prior critic has written its `*.passed` marker
-under `.superlazy-build/<run-id>/`.
+A `PreToolUse` hook gates execution: it recomputes the plan/tasks/spec hashes
+recorded in `plan-critic.passed` and requires the sdd invocation to name the
+approved plan via exactly one `planPath=` argument — post-approval edits and
+approved-A/executed-B swaps are both denied at the authorization point.
+
+### Who runs what
+
+| Role | Model | Where |
+|---|---|---|
+| Planner/drafter | **Fable** | `superlazy-drafter` subagent (no write tools) |
+| Critic — all three seams | **Sol** (`gpt-5.6-sol`, pinned) | `codex-critic.sh spec\|plan\|code` |
+| mechanical / standard tasks | **Sonnet** (low / medium) | execution waves, via `model-routing.json` |
+| frontier tasks | **Opus** | execution waves |
+| Review pair | **Opus + Sol** | `superlazy-review` (the one fixed pair) |
 
 ### What's inside
 
@@ -141,7 +151,7 @@ Flags:
 - `--codex-model <id>` — Codex reviewer model (**default: gpt-5.6-sol**).
 - `--claude-model <sonnet|opus|haiku>` — Claude reviewer model (**default: opus**; use `sonnet` for a cheaper pass).
 
-Out of the box: **Sonnet on the Claude side, Sol on the Codex side.** The report
+Out of the box: **Opus on the Claude side, Sol on the Codex side.** The report
 header names the models actually used. Output lands in `.superlazy-review/<run-id>/report.md`.
 
 ---

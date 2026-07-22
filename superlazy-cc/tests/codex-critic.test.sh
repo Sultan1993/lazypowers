@@ -111,6 +111,12 @@ for badfence in \
   [ ! -e "$SIDE" ] || bad "7 schema violation approved: $badfence"
 done
 ok "7 plan-md schema violations write nothing"
+# 7c: two task sections, only one fence → not clean (per-section parsing)
+rm -f run/* "$SIDE"
+printf 'Spec: docs/spec.md\n\n### Task 1: t\n**Goal:** g\n\n```json:metadata\n%s\n```\n\n### Task 2: fenceless\n**Goal:** g2\n' "$FENCE" > "$PLAN"
+V "${CLEAN[@]}"; run spec SPEC_PATH="$SPEC"
+V "${CLEAN[@]}"; run plan SPEC_PATH="$SPEC" PLAN_PATH="$PLAN"
+check "7c fence-less task section rejected (per-section, not global count)" '[ ! -e "$SIDE" ] && grep -q "exactly one json:metadata fence" err.txt'
 write_plan "$FENCE"
 
 # --- case 7b: equivalence violation → nothing ----------------------------------------

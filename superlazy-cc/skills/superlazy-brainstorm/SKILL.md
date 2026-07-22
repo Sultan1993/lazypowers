@@ -49,7 +49,9 @@ the sidecar. There is NO "proceed anyway" in this command.
    done
    ```
    On BUSY: STOP loudly (another session owns an active run for this slug).
-   Else allocate the first genuinely ABSENT name in the family (`<slug>`,
+   An active family member owned by THIS session → rebind and reuse it (one
+   run per brief — build adopts this same dir under `--continue`). Else
+   allocate the first genuinely ABSENT name in the family (`<slug>`,
    `<slug>-2`, …) — `.done` dirs are historical records: never reuse, clear, or
    rebind them. Then bind:
    ```bash

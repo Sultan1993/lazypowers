@@ -87,13 +87,16 @@ case "$skill" in
       # structured planPath= argument: EXACTLY ONE token, exact equality after
       # canonicalization (duplicates are ambiguous — deny, never pick one)
       args="$(printf '%s' "$input" | jq -r '.tool_input.args // empty')"
-      tok_count="$(printf '%s' "$args" | grep -oE 'planPath=[^[:space:]]+' | grep -c . || true)"
+      # token boundary: start-of-string or whitespace before planPath= —
+      # 'xplanPath=…' is NOT a token
+      toks="$(printf '%s' "$args" | grep -oE '(^|[[:space:]])planPath=[^[:space:]]+' | sed 's/^[[:space:]]*//' || true)"
+      tok_count="$(printf '%s' "$toks" | grep -c . || true)"
       [ "$tok_count" -eq 1 ] || {
         [ "$tok_count" -eq 0 ] && \
           deny "superlazy-build: execution must name the approved plan — invoke sdd with a 'planPath=$m_planPath' argument."
         deny "superlazy-build: $tok_count planPath= arguments found — exactly one is required (ambiguous invocation)."
       }
-      inv_path="$(printf '%s' "$args" | grep -oE 'planPath=[^[:space:]]+' | cut -d= -f2-)"
+      inv_path="$(printf '%s' "$toks" | cut -d= -f2-)"
       [ "$(canon "$inv_path")" = "$(canon "$m_planPath")" ] || \
         deny "superlazy-build: invocation names '$inv_path' but the approval is for '$m_planPath' — approved plan and executed plan must be identical."
     fi

@@ -73,11 +73,24 @@ import json, re, sys
 plan_path, tasks_path = sys.argv[1], sys.argv[2]
 errs = []
 src = open(plan_path, encoding='utf-8').read()
-fences_md = re.findall(r'```json:metadata\n(.*?)\n```', src, re.S)
-if not fences_md:
-    errs.append("plan markdown contains no json:metadata fences")
+# Parse per TASK SECTION (### Task N: ...) — a global fence count could let a
+# fence-less section hide behind a double-fenced sibling or a header fence.
+sections = re.split(r'^### ', src, flags=re.M)[1:]
+if not sections:
+    errs.append("plan markdown contains no '### Task' sections")
+fences_md = []
+for i, sec in enumerate(sections):
+    body = re.split(r'^## ', sec, flags=re.M)[0]
+    found = re.findall(r'```json:metadata\n(.*?)\n```', body, re.S)
+    if len(found) != 1:
+        errs.append(f"plan task section {i}: expected exactly one json:metadata fence, found {len(found)}")
+        fences_md.append(found[0] if found else None)
+    else:
+        fences_md.append(found[0])
 parsed_md = []
 for i, f in enumerate(fences_md):
+    if f is None:
+        parsed_md.append(None); continue
     try:
         m = json.loads(f)
     except Exception as e:
