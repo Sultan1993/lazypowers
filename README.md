@@ -1,10 +1,13 @@
 # lazypowers
 
 A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin marketplace.
-Ships one plugin — **superlazy-cc** — with two skills:
+Ships one plugin — **superlazy-cc** — with three skills:
 
-- **`superlazy-build`** — a gated, reviewed feature-build pipeline.
-- **`superlazy-review`** — a two-model adversarial code review.
+- **`superlazy-brainstorm`** — Fable plans, Sol approves, you review. Stops
+  with a hash-bound approved plan + an HTML review page.
+- **`superlazy-build`** — executes an approved plan (verify → skip to
+  execution; stale → one-pass re-bless). No plan? It brainstorms inline first.
+- **`superlazy-review`** — a two-model (Opus + Sol) adversarial code review.
 
 > **This is a fork of [qrotux/lazypowers](https://github.com/qrotux/lazypowers).**
 > The key difference: every critic/reviewer runs on **OpenAI Codex** (model
@@ -16,13 +19,42 @@ Ships one plugin — **superlazy-cc** — with two skills:
 
 ## superlazy-cc
 
-### How the two skills relate
+### How the three skills relate
 
-- `superlazy-build` **builds** a feature and gates each stage behind a Codex critic.
-- `superlazy-review` **reviews** an existing diff (yours or a PR) with two models and ranks the findings.
+- `superlazy-brainstorm` **plans**: Fable (via a write-tool-less drafter
+  subagent) authors the spec and plan; Sol gates both seams; approval is a
+  sidecar carrying the sha256 of the exact approved bytes. Hard stop — you
+  review the generated HTML and decide.
+- `superlazy-build` **executes**: with a plan it runs `codex-critic.sh verify`
+  (no LLM call) and skips straight to execution; a stale/edited plan gets one
+  Sol re-bless pass — never a re-brainstorm. Per-task model routing
+  (mechanical/standard → Sonnet, frontier → Opus) via
+  `docs/superpowers/model-routing.json`. Sol's code-critic gates the diff.
+- `superlazy-review` **reviews** an existing diff (yours or a PR) with two
+  models — Claude on **Opus** by default + Sol — and ranks findings by
+  cross-model agreement.
 
-Both share one wrapper, `scripts/codex-critic.sh`, which runs a prompt on Codex
-in a **read-only sandbox** and returns its verdict.
+All three share one wrapper, `scripts/codex-critic.sh`, which runs a prompt on
+Codex in a **read-only sandbox** — and is the ONLY writer of approval markers
+and sidecars (`spec|plan|code` modes write them solely on `VERDICT: pass` with
+zero Critical/Important findings; `verify` re-validates a sidecar without any
+LLM call).
+
+### The trust chain (1.6.0)
+
+```
+superlazy-brainstorm:  you ──▶ Fable drafts ──▶ Sol spec-critic ──▶ Fable plans
+                       ──▶ Sol plan-critic (+tier audit) ──▶ sidecar + HTML ──▶ STOP
+superlazy-build <plan>: verify sidecar ──▶ execute (Sonnet/Opus per task)
+                        ──▶ Sol code-critic ──▶ finish
+```
+
+Approvals are hash-bound: `spec-critic.passed` records the spec's sha256,
+`plan-critic.passed` records plan+tasks+spec sha256s, and the execution gate
+recomputes all three (and requires the sdd invocation to name the approved
+plan via a structured `planPath=` argument) before allowing execution. Edit
+anything after approval → one re-bless pass, automatically. Tamper-evident,
+not tamper-proof: the adversary is drift, not malice.
 
 ---
 
@@ -53,18 +85,22 @@ under `.superlazy-build/<run-id>/`.
 | `codex-critic.sh` (script) | Runs a critic prompt on Codex (`codex exec -s read-only`) and returns its VERDICT block. |
 | `superlazy-build-gate.sh` (hook) | PreToolUse seam gate. No-op outside a run. |
 
-The three critics run on **Codex/Sol** in a read-only sandbox. The coordinator
-parses each critic's `VERDICT:` block and writes the marker the gate checks.
+The three critics run on **Codex/Sol** in a read-only sandbox — seam modes are
+pinned to Sol (env overrides ignored). The SCRIPT parses its own verdict and
+writes the markers; the coordinator can only route through them.
 
 ### Usage
 
 ```
-/superlazy-build <your feature brief>
+/superlazy-brainstorm <your feature brief>     # plan today…
+/superlazy-build docs/superpowers/plans/X.md   # …build when you're ready
+/superlazy-build <your feature brief>          # or do both in one go
 ```
 
-Flags:
-- `--skip-critics` — run the plain superpowers flow without the gated critics
-  (also auto-skipped for trivial, single-file changes).
+Flags (build):
+- `--spec <path>` — spec location for re-bless when no sidecar names it.
+- `--skip-critics` — loud bypass: Fable still authors, but nothing is
+  approved (no sidecar), so a later normal build re-critiques.
 - `--serial` — opt out of wave parallelism during execution.
 
 ---
@@ -102,8 +138,8 @@ Flags:
 - `--post` — PR mode only: post surviving Critical/Important findings as inline PR comments (opt-in; confirms first).
 - `--serial` — disable parallel fan-out.
 - `--dimensions correctness,security,...` — review a subset of the six dimensions.
-- `--claude-model <sonnet|opus|haiku>` — Claude reviewer model (**default: sonnet**; use `opus` for the heaviest reviews).
 - `--codex-model <id>` — Codex reviewer model (**default: gpt-5.6-sol**).
+- `--claude-model <sonnet|opus|haiku>` — Claude reviewer model (**default: opus**; use `sonnet` for a cheaper pass).
 
 Out of the box: **Sonnet on the Claude side, Sol on the Codex side.** The report
 header names the models actually used. Output lands in `.superlazy-review/<run-id>/report.md`.

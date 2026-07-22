@@ -1,7 +1,7 @@
 {
   "name": "superlazy-cc",
-  "description": "Gated, reviewed feature-build pipeline: brainstorming -> spec-critic -> writing-plans -> plan-critic -> execution -> code-critic, with a PreToolUse seam gate. Critics run on OpenAI Codex (codex exec, read-only) instead of Claude subagents. Drives the superpowers-extended-cc skills (must be installed/enabled). Also ships superlazy-review: a two-model (Claude + Codex) adversarial code-review skill.",
-  "version": "1.5.0",
+  "description": "Three-command, critic-gated development pipeline: superlazy-brainstorm (Fable drafts the spec+plan, Sol/Codex gates both seams, hash-bound approval sidecar, HTML plan review, hard stop), superlazy-build (verifies the sidecar and skips straight to execution, one-pass re-bless on stale plans, per-task model routing, Sol code-critic on the diff), and superlazy-review (Opus + Sol two-model adversarial code review). Approvals are written only by the critic script and carry the hashes of the exact bytes they approved. Drives the superpowers-extended-cc skills (must be installed/enabled).",
+  "version": "1.6.0",
   "author": {
     "name": "Sultan1993 (fork of qrotux)"
   },
@@ -10,6 +10,8 @@
     "superpowers",
     "critic",
     "pipeline",
-    "workflow"
+    "workflow",
+    "fable",
+    "codex"
   ]
 }
