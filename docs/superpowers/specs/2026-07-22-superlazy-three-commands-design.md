@@ -1,6 +1,6 @@
 # superlazy-cc — three-command restructure — design spec
 
-Date: 2026-07-22 (rev 5 — single task owner, strict marker parsing, spec-bound execution after spec-critic round 4 `targeted-fixes`, 4 Critical / 1 Important / 1 Minor)
+Date: 2026-07-22 (rev 6 — ownership/mutex consistency after spec-critic round 5 `targeted-fixes`, 0 Critical / 2 Important / 3 Minor)
 Status: in review (Seam 1)
 Repo: `Sultan1993/lazypowers` (plugin `superlazy-cc`), version `1.5.0` → `1.6.0`
 
@@ -32,7 +32,7 @@ Enforced **by construction**:
   `codex-critic.sh`, and the sidecar only after both seams passed (ordering below).
 - The execution stage is blocked by the session-bound gate hook unless
   `plan-critic.passed` exists in the session's run dir — and, for hash-bearing
-  markers, unless the plan/tasks bytes still match what was approved.
+  markers, unless the plan, tasks, AND spec bytes still match what was approved.
 - Every task in an approved plan carries a valid `modelTier` — enforced by the
   deterministic `.tasks.json` schema validation `plan` mode runs before writing
   any approval (the upstream `pre-taskcreate-model-tier` harness gate also
@@ -77,8 +77,8 @@ Produces an approved, executable plan and stops.
    `Spec: <repo-root-relative path>` reference line (part of the drafter's
    output template) — this is the spec resolver's fallback when no sidecar
    exists. The coordinator writes `<plan>.md` and `<plan>.md.tasks.json` —
-   **native tasks are NOT created yet** (they are created only from
-   approved bytes, step 6b).
+   **no native tasks are created** (the execution stage owns task creation and
+   extracts them from the gate-validated files when build later runs).
 6. **Seam 2:** coordinator runs `codex-critic.sh plan` (marker mode with
    `PLAN_PATH`/`SPEC_PATH`). On a clean verdict, **and** only if the
    `spec-critic.passed` marker exists AND its recorded `specHash` still matches
@@ -125,8 +125,11 @@ Internal `--continue` flag: suppresses the hard stop; used only when
   carry forward the spec approval when the spec is unchanged, then one
   `codex-critic.sh plan` pass; if the spec changed too, the spec seam re-runs
   first (two Sol calls, still no Fable). Never brainstorm when `tasks.json`
-  exists. Build creates no native tasks — the execution stage (sdd) is the
-  single task-creation owner and extracts them from the gate-validated files.
+  exists. Build creates **no native tasks of any kind** — the execution stage
+  (sdd) is the single task-creation owner. This REMOVES current build's
+  Step 0.5 ("Create three native seam-gate tasks", `SKILL.md:85-86`): the
+  marker files are the seam state, and tracker tasks would make build a second
+  task owner. Neither brainstorm nor build contains a `TaskCreate` call at all.
 - **Without a plan** (no path, or path without `.tasks.json`): invoke
   `superlazy-brainstorm --continue`, then execute without stopping.
 - Build **announces the branch it took** in one line ("Approved plan verified —
@@ -319,7 +322,7 @@ therefore manage runs as:
 |---|---|---|
 | `superlazy-brainstorm` (standalone) | creates `<slug>` (mutex-checked as today) | **`.done` at the hard stop** — its job ends with the sidecar written; leaving it active would false-BUSY a later session's build |
 | `superlazy-brainstorm --continue` | creates `<slug>` | left **active**; build keeps using it in-session (markers present, gate armed), `.done` at build's finish as today |
-| `superlazy-build <plan>` | mutex first: an ACTIVE dir for this slug owned by a foreign session → **BUSY, stop** (parallel-run protection, as today); an active dir owned by THIS session → rebind and reuse it. Otherwise allocate the first **genuinely absent** name: `<plan-slug>`, else `<plan-slug>-2`, `-3`, … `.done` dirs are never reused, cleared, or rebound — they are historical records the gate and mutex both ignore | `verify`/re-bless mint markers into it; `.done` at finish |
+| `superlazy-build <plan>` | mutex scans the **whole slug family** (`<plan-slug>` and every `<plan-slug>-N`): any family member ACTIVE and owned by a foreign session → **BUSY, stop** (a `.done` base must not let allocation sidestep a foreign `-2`); a family member active and owned by THIS session → rebind and reuse it. Only then allocate the first **genuinely absent** name in the family. `.done` dirs are never reused, cleared, or rebound — historical records the gate ignores | `verify`/re-bless mint markers into it; `.done` at finish |
 
 Same slug, brainstorm-today/build-tomorrow, different sessions: brainstorm's
 dir is `.done` (ignored by gate and mutex), build allocates fresh, `verify`
@@ -405,9 +408,14 @@ Pinned semantics:
 Active upstream plugin: **6.2.2-dev** (updated during this design). Tier→model
 routing AND the per-tier effort map are both delivered by its session notice
 (effort advisory: `mechanical: low, standard: medium, frontier: inherit`, labeled
-user-set from our routing file). The three harness gates are present, registered,
-and armed by `docs/superpowers/model-routing.json` (committed). Kill switch:
-`SUPERPOWERS_ROUTING_GUARD=0`. The drafter agent may additionally pin effort in
+user-set from our routing file). The three harness gates are installed and
+**enabled** by `docs/superpowers/model-routing.json` (committed) — but enabled
+≠ flow-armed: only the tier gate (`pre-taskcreate-model-tier`, fires on sdd's
+TaskCreate calls) and the dispatch gate (`pre-agent-model-routing`) actually
+participate in these flows. The handoff guard (`pre-askuser-handoff-guard`)
+arms on a `writing-plans` signal followed by TaskCreate, which brainstorm never
+emits — it stays dormant here, which is why brainstorm's ending-by-print is a
+design rule, not an enforced one. Kill switch: `SUPERPOWERS_ROUTING_GUARD=0`. The drafter agent may additionally pin effort in
 its frontmatter as a determinism boost. `subagent-driven-development` is
 byte-identical between 6.0.3 and 6.2.2 (verified), so the execution stage we
 wrap is unchanged by the upstream update; `writing-plans`' new grep-count
@@ -504,7 +512,9 @@ Static wiring (grep, matching repo precedent):
 - both review agents have `model: opus`; SKILL contains the always-pass-model
   instruction; `review-synth.mjs` contains `'opus'` fallback
 - build SKILL contains: `verify`, re-bless branch, `--spec`, brainstorm
-  delegation, announce lines; OVERRIDE prose absent
+  delegation, announce lines; OVERRIDE prose absent; **no `TaskCreate`**
+  (seam-tracker task creation removed — single-owner check covers BOTH new
+  SKILLs)
 - brainstorm SKILL contains: run-dir init, the `CLAUDE_CODE_SUBAGENT_MODEL`
   preflight, seam loops, sidecar path, plan-viz invocation, print-and-stop
   ending, `.done` at standalone stop, `--continue` — and NO `TaskCreate`
@@ -523,6 +533,10 @@ prove). One toy feature, then walk every deterministic plan-resolution branch:
    `--spec-only` to validate against), then plan seam, executes
 4b. brainstorm standalone in session A (`.done` written) → `build <plan>` in a
    NEW session → no mutex BUSY, fresh run dir allocated, verify fast path works
+4c. base slug `.done` + a foreign-session ACTIVE `<slug>-2` → build → **BUSY,
+   stop** (slug-family scan; allocation must not sidestep to `<slug>-3`)
+4d. after execution completes: native task count == task count in the approved
+   `.tasks.json` (single-owner proof — no duplicates from brainstorm/build)
 5. `superlazy-build` with a brief (no plan) → brainstorm runs inline, no hard
    stop, executes
 6. `superlazy-build --skip-critics` with a plan → executes with no run dir, no
