@@ -117,6 +117,24 @@ printf 'Spec: docs/spec.md\n\n### Task 1: t\n**Goal:** g\n\n```json:metadata\n%s
 V "${CLEAN[@]}"; run spec SPEC_PATH="$SPEC"
 V "${CLEAN[@]}"; run plan SPEC_PATH="$SPEC" PLAN_PATH="$PLAN"
 check "7c fence-less task section rejected (per-section, not global count)" '[ ! -e "$SIDE" ] && grep -q "exactly one json:metadata fence" err.txt'
+# 7d: only '### Task' headings are tasks — a fenced '### Notes' cannot masquerade
+rm -f run/* "$SIDE"
+printf 'Spec: docs/spec.md\n\n### Notes\nnot a task\n\n```json:metadata\n%s\n```\n' "$FENCE" > "$PLAN"
+V "${CLEAN[@]}"; run spec SPEC_PATH="$SPEC"
+V "${CLEAN[@]}"; run plan SPEC_PATH="$SPEC" PLAN_PATH="$PLAN"
+check "7d fenced non-Task H3 does not count as a task" '[ ! -e "$SIDE" ] && grep -q "no .### Task. sections" err.txt'
+# 7e: auxiliary H3 alongside a valid task does not invalidate it
+rm -f run/* "$SIDE"
+printf 'Spec: docs/spec.md\n\n### Task 1: t\n**Goal:** g\n\n```json:metadata\n%s\n```\n\n### Notes\naux prose, no fence\n' "$FENCE" > "$PLAN"
+python3 -c "
+import json,sys
+fence=sys.argv[1]
+desc='**Goal:** g\n\n\`\`\`json:metadata\n'+fence+'\n\`\`\`'
+json.dump({'planPath':'docs/plan.md','tasks':[{'id':0,'subject':'Task 1: t','status':'pending','description':desc}]},open('$TASKS','w'))
+" "$FENCE"
+V "${CLEAN[@]}"; run spec SPEC_PATH="$SPEC"
+V "${CLEAN[@]}"; run plan SPEC_PATH="$SPEC" PLAN_PATH="$PLAN"
+check "7e auxiliary H3 beside a valid task still approves" '[ -s "$SIDE" ]'
 write_plan "$FENCE"
 
 # --- case 7b: equivalence violation → nothing ----------------------------------------
