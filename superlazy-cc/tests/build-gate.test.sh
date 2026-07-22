@@ -81,6 +81,8 @@ expect "22b path extending A's filename → deny" deny "planPath=${PLAN%.md}-v2.
 expect "22c both paths present, planPath= = B → deny" deny "see $PLAN planPath=docs/plan-v2.md"
 expect "22d missing planPath= argument → deny" deny "run the plan at $PLAN please"
 expect "22e canonicalized exact match → allow" allow "planPath=./docs//plan.md"
+expect "22f duplicate planPath= tokens → deny (even if one matches)" deny "planPath=$PLAN planPath=docs/plan-v2.md"
+expect "22g duplicate identical tokens → deny (cardinality, not content)" deny "planPath=$PLAN planPath=$PLAN"
 
 # no marker at all → deny (pre-existing behavior)
 rm -f "$RUN/plan-critic.passed"

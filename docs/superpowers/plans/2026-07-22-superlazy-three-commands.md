@@ -116,17 +116,19 @@ non-empty → must parse as JSON with planPath/planHash/tasksHash/specPath/specH
 (jq), else DENY "corrupt approval marker"; recompute sha256 of the three files
 (paths relative to repo root; missing file → deny) and deny on any mismatch
 with a message naming the changed file; ALSO parse the structured
-`planPath=<path>` argument from tool_input (never substring search),
-canonicalize, exact-equality vs marker planPath (absent/unparseable/unequal →
-deny — approved-A/executed-B incl. filename-extension and both-paths cases). Keep all other behavior identical.
+`planPath=<path>` argument from tool_input (never substring search) with
+CARDINALITY EXACTLY ONE — zero tokens deny, two-or-more tokens deny even if
+one matches (duplicates are ambiguous); then canonicalize and require exact
+equality vs marker planPath (approved-A/executed-B incl. filename-extension,
+both-paths, and duplicate-token cases). Keep all other behavior identical.
 Tests: crafted-stdin invocations (existing repo test pattern): spec cases
 18–22 (intact→allow; plan/tasks/spec byte flip→deny each; empty legacy→allow;
-corrupt JSON / missing field→deny; planPath= arg naming B / extending A's filename / missing → deny; exact A → allow).
+corrupt JSON / missing field→deny; planPath= arg naming B / extending A's filename / missing / DUPLICATED (2+ tokens, even identical) → deny; exactly one exact-match token → allow).
 **Acceptance Criteria:** cases 18–22 pass (incl. planPath invocation binding); writing-plans arm untouched
 **Verify:** `bash superlazy-cc/tests/build-gate.test.sh`
 
 ```json:metadata
-{"files": ["superlazy-cc/hooks/superlazy-build-gate.sh", "superlazy-cc/tests/build-gate.test.sh"], "modelTier": "standard", "verifyCommand": "bash superlazy-cc/tests/build-gate.test.sh", "acceptanceCriteria": ["hash recompute + deny on mismatch incl. spec", "invocation-path binding", "empty marker legacy allow", "malformed marker deny", "cases 18-22 pass"]}
+{"files": ["superlazy-cc/hooks/superlazy-build-gate.sh", "superlazy-cc/tests/build-gate.test.sh"], "modelTier": "standard", "verifyCommand": "bash superlazy-cc/tests/build-gate.test.sh", "acceptanceCriteria": ["hash recompute + deny on mismatch incl. spec", "invocation-path binding with cardinality exactly one", "empty marker legacy allow", "malformed marker deny", "cases 18-22 incl. duplicate-token denials pass"]}
 ```
 
 ### Task 4: plan-viz — generator + tests
@@ -221,7 +223,14 @@ AskUserQuestion at the end
 **Files:** Modify `superlazy-cc/skills/superlazy-build/SKILL.md`
 **Steps:** Inputs: optional plan path, `--spec`, `--skip-critics`, `--serial`.
 Plan resolution ladder per spec (tasks.json presence → PLAN; announce branch
-taken). Run-dir: slug-family mutex scan, first-absent allocation, .done rules.
+taken). `--skip-critics` two-branch bypass, fully spelled: LOUD announce; NO
+run dir created (gate dormant by its no-active-run rule); BRIEF branch →
+invoke brainstorm with BOTH flags `--continue --skip-critics` (Fable still
+authors; no markers, no sidecar); PLAN branch → skip verify AND re-bless
+entirely; both branches skip Seam 3; state on announce that nothing is
+approved so a later non-skip build re-critiques (bypass defers review, never
+forges it). Run-dir (non-skip): slug-family mutex scan, first-absent
+allocation, .done rules.
 With plan: `MARKER_DIR=<run> "$WRAP" verify <plan>`; exit 3 → re-bless
 (`verify --spec-only` → plan critic; spec changed → spec critic then plan
 critic; spec resolver: sidecar → `Spec:` line → `--spec` → STOP). Without
@@ -235,10 +244,10 @@ parses + exact-matches it). Update VERDICT parser to
 pass-token semantics. Effort policy: first pass per seam high, re-reviews
 medium, user-exported `CODEX_CRITIC_EFFORT` wins.
 **Acceptance Criteria:** greps below; OVERRIDE prose gone; no TaskCreate
-**Verify:** `bash -c 'set -e; f=superlazy-cc/skills/superlazy-build/SKILL.md; for a in verify spec-only planPath= Spec: superlazy-brainstorm continue slug CODEX_CRITIC_EFFORT skip-critics; do grep -q -- "$a" "$f"; done; ! grep -q OVERRIDE "$f"; ! grep -q "seam-gate tasks" "$f"; ! grep -qE "TaskCreate:|invoke TaskCreate|call TaskCreate" "$f"'`
+**Verify:** `bash -c 'set -e; f=superlazy-cc/skills/superlazy-build/SKILL.md; for a in verify spec-only planPath= Spec: superlazy-brainstorm slug CODEX_CRITIC_EFFORT; do grep -q -- "$a" "$f"; done; grep -q -- "--continue --skip-critics" "$f"; grep -qE "create NO run dir|NO run dir created|no run dir" "$f"; grep -qiE "skip Seam 3|Seam 3 is also skipped|skip .*code.critic" "$f"; grep -qiE "nothing is approved|cannot fake|never forges" "$f"; ! grep -q OVERRIDE "$f"; ! grep -q "seam-gate tasks" "$f"; ! grep -qE "TaskCreate:|invoke TaskCreate|call TaskCreate" "$f"'`
 
 ```json:metadata
-{"files": ["superlazy-cc/skills/superlazy-build/SKILL.md"], "modelTier": "standard", "verifyCommand": "wiring greps + OVERRIDE/tracker absence", "acceptanceCriteria": ["trust ladder + announce", "verify/re-bless wiring", "brainstorm delegation", "no OVERRIDE prose", "no TaskCreate", "run lifecycle rules"]}
+{"files": ["superlazy-cc/skills/superlazy-build/SKILL.md"], "modelTier": "standard", "verifyCommand": "wiring greps + OVERRIDE/tracker absence", "acceptanceCriteria": ["trust ladder + announce", "verify/re-bless wiring", "brainstorm delegation with --continue --skip-critics propagation", "two-branch bypass: no run dir, no critic calls, no forged approval", "no OVERRIDE prose", "no TaskCreate", "run lifecycle rules"]}
 ```
 
 ### Task 9: integration — version, README, full matrix
@@ -251,10 +260,26 @@ Then run EVERYTHING — the barrier re-executes every prior task's own Verify
 command verbatim (Tasks 1–8), then the four suites. The full static matrix is
 therefore the UNION of the per-task Verify commands, not a summary of them.
 **Acceptance Criteria:** all suites green; version 1.6.0; README covers three commands
-**Verify:** run each of Task 1–8's Verify commands verbatim (all must pass), then: `bash -c 'set -e; bash superlazy-cc/tests/codex-critic.test.sh >/dev/null; bash superlazy-cc/tests/build-gate.test.sh >/dev/null; node --test superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.test.mjs superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs >/dev/null; grep -q "\"version\": \"1.6.0\"" superlazy-cc/.claude-plugin/plugin.json; grep -q superlazy-brainstorm README.md'`
+**Verify:** the literal ordered barrier command:
+
+```bash
+( grep -q 'model: fable' superlazy-cc/agents/superlazy-drafter.md && ! grep -qE '^tools:.*(Write|Edit|Bash)' superlazy-cc/agents/superlazy-drafter.md && grep -q 'mcp__context7__resolve-library-id' superlazy-cc/agents/superlazy-drafter.md && grep -q 'Spec:' superlazy-cc/agents/superlazy-drafter.md ) && \
+( bash superlazy-cc/tests/codex-critic.test.sh ) && \
+( bash superlazy-cc/tests/build-gate.test.sh ) && \
+( node --test superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.test.mjs ) && \
+( bash -c 'set -e; for f in superlazy-cc/agents/superlazy-review-critic.md superlazy-cc/agents/superlazy-refute-critic.md; do grep -q "^model: opus" "$f"; done; grep -q "claudeModel:<--claude-model or \"opus\">" superlazy-cc/skills/superlazy-review/SKILL.md; grep -qc "model: <--claude-model or opus>" superlazy-cc/skills/superlazy-review/SKILL.md; grep -q "meta.claudeModel || .opus." superlazy-cc/skills/superlazy-review/lib/review-synth.mjs; node --test superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs >/dev/null' ) && \
+( grep -qi 'tier' superlazy-cc/agents/superlazy-plan-critic.md && grep -qi 'spec completeness' superlazy-cc/agents/superlazy-plan-critic.md ) && \
+( bash -c 'set -e; f=superlazy-cc/skills/superlazy-brainstorm/SKILL.md; for a in superlazy-drafter CLAUDE_CODE_SUBAGENT_MODEL MARKER_DIR SPEC_PATH PLAN_PATH plan-viz .done -- --continue --skip-critics Spec: CODEX_CRITIC_EFFORT; do [ "$a" = -- ] && continue; grep -q -- "$a" "$f"; done; ! grep -qE "TaskCreate:|invoke TaskCreate|call TaskCreate" "$f"; ! grep -q "AskUserQuestion" "$f" || grep -q "never.*AskUserQuestion\|Never ask" "$f"' ) && \
+( bash -c 'set -e; f=superlazy-cc/skills/superlazy-build/SKILL.md; for a in verify spec-only planPath= Spec: superlazy-brainstorm slug CODEX_CRITIC_EFFORT; do grep -q -- "$a" "$f"; done; grep -q -- "--continue --skip-critics" "$f"; grep -qE "create NO run dir|NO run dir created|no run dir" "$f"; grep -qiE "skip Seam 3|Seam 3 is also skipped|skip .*code.critic" "$f"; grep -qiE "nothing is approved|cannot fake|never forges" "$f"; ! grep -q OVERRIDE "$f"; ! grep -q "seam-gate tasks" "$f"; ! grep -qE "TaskCreate:|invoke TaskCreate|call TaskCreate" "$f"' ) && \
+( bash superlazy-cc/tests/codex-critic.test.sh >/dev/null ) && \
+( bash superlazy-cc/tests/build-gate.test.sh >/dev/null ) && \
+( node --test superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.test.mjs superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs >/dev/null ) && \
+( grep -q '"version": "1.6.0"' superlazy-cc/.claude-plugin/plugin.json ) && \
+( grep -q superlazy-brainstorm README.md ) && echo BARRIER-GREEN
+```
 
 ```json:metadata
-{"files": ["superlazy-cc/.claude-plugin/plugin.json", "README.md"], "modelTier": "standard", "verifyCommand": "full matrix per Verify", "acceptanceCriteria": ["1.6.0", "README three commands", "all suites green", "Tasks 1-8 Verify commands re-executed at the barrier"], "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8]}
+{"files": ["superlazy-cc/.claude-plugin/plugin.json", "README.md"], "modelTier": "standard", "verifyCommand": "the literal ordered barrier command in this task's Verify block (Tasks 1-8 verifies chained, then the four suites, then version/README greps; prints BARRIER-GREEN)", "acceptanceCriteria": ["1.6.0", "README three commands", "all suites green", "Tasks 1-8 Verify commands re-executed at the barrier"], "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8]}
 ```
 
 ## Waves

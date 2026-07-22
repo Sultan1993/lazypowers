@@ -84,11 +84,16 @@ case "$skill" in
         deny "superlazy-build: TASKS changed after approval (${m_planPath}.tasks.json) — re-bless via the plan critic before executing."
       [ "$(sha "$root/$m_specPath")" = "$m_specHash" ] || \
         deny "superlazy-build: SPEC changed after approval ($m_specPath) — re-run the seams before executing."
-      # structured planPath= argument, exact equality after canonicalization
+      # structured planPath= argument: EXACTLY ONE token, exact equality after
+      # canonicalization (duplicates are ambiguous — deny, never pick one)
       args="$(printf '%s' "$input" | jq -r '.tool_input.args // empty')"
-      inv_path="$(printf '%s' "$args" | grep -oE 'planPath=[^[:space:]]+' | head -1 | cut -d= -f2- || true)"
-      [ -n "$inv_path" ] || \
-        deny "superlazy-build: execution must name the approved plan — invoke sdd with a 'planPath=$m_planPath' argument."
+      tok_count="$(printf '%s' "$args" | grep -oE 'planPath=[^[:space:]]+' | grep -c . || true)"
+      [ "$tok_count" -eq 1 ] || {
+        [ "$tok_count" -eq 0 ] && \
+          deny "superlazy-build: execution must name the approved plan — invoke sdd with a 'planPath=$m_planPath' argument."
+        deny "superlazy-build: $tok_count planPath= arguments found — exactly one is required (ambiguous invocation)."
+      }
+      inv_path="$(printf '%s' "$args" | grep -oE 'planPath=[^[:space:]]+' | cut -d= -f2-)"
       [ "$(canon "$inv_path")" = "$(canon "$m_planPath")" ] || \
         deny "superlazy-build: invocation names '$inv_path' but the approval is for '$m_planPath' — approved plan and executed plan must be identical."
     fi
