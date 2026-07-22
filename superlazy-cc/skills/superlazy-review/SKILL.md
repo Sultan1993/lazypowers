@@ -65,7 +65,7 @@ If `git -C "$WT" diff --quiet "$BASE".."$HEAD"` → tell the user "nothing to re
 If BASE is empty / HEAD detached with no base → STOP and ask for `--base`.
 
 ## Step 2 — Gather context (optional)
-- Local: newest of `docs/superpowers/specs/*.md`, `docs/superpowers/plans/*.md`, or a `.superlazy-build/*/` plan. Read it (cap ~4KB).
+- Local: newest of `docs/superpowers/specs/*.md` or `docs/superpowers/plans/*.md`. Read it (cap ~4KB).
 - PR: title + body from `/tmp/slr-pr.json`; if the body references an issue (`#NN`), `gh issue view NN --json title,body`.
 - Concatenate into CONTEXT text (or "(none)").
 

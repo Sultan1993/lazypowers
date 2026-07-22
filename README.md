@@ -3,10 +3,10 @@
 A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin marketplace.
 Ships one plugin — **superlazy-cc** — with three skills:
 
-- **`superlazy-brainstorm`** — Fable plans, Sol approves, you review. Stops
-  with a hash-bound approved plan + an HTML review page.
-- **`superlazy-build`** — executes an approved plan (verify → skip to
-  execution; stale → one-pass re-bless). No plan? It brainstorms inline first.
+- **`superlazy-brainstorm`** — Fable drafts, Sol critiques, Fable concludes.
+  Stops with a detailed plan, rendered as an HTML page you can actually read.
+- **`superlazy-build`** — executes the plan you hand it. No plan? It
+  brainstorms inline first.
 - **`superlazy-review`** — a two-model (Opus + Sol) adversarial code review.
 
 > **This is a fork of [qrotux/lazypowers](https://github.com/qrotux/lazypowers).**
@@ -22,64 +22,54 @@ Ships one plugin — **superlazy-cc** — with three skills:
 ### How the three skills relate
 
 - `superlazy-brainstorm` **plans**: Fable (via a write-tool-less drafter
-  subagent) authors the spec and plan; Sol gates both seams; approval is a
-  sidecar carrying the sha256 of the exact approved bytes. Hard stop — you
-  review the generated HTML and decide.
-- `superlazy-build` **executes**: with a plan it runs `codex-critic.sh verify`
-  (no LLM call) and skips straight to execution; a stale/edited plan gets one
-  Sol re-bless pass — never a re-brainstorm. Per-task model routing
-  (mechanical/standard → Sonnet, frontier → Opus) via
-  `docs/superpowers/model-routing.json`. Sol's code-critic gates the diff.
+  subagent) authors the spec and plan; Sol critiques each one, at most twice;
+  Fable revises and concludes. Hard stop — you read the generated HTML page
+  (the whole plan: brief, then every task with goal/steps/files/criteria/verify,
+  grouped into execution waves) and decide.
+- `superlazy-build` **executes**: hand it a plan and it goes straight to work.
+  Per-task model routing (mechanical/standard → Sonnet, frontier → Opus) via
+  `docs/superpowers/model-routing.json`. Sol reviews the diff at the end.
 - `superlazy-review` **reviews** an existing diff (yours or a PR) with two
   models — Claude on **Opus** by default + Sol — and ranks findings by
   cross-model agreement.
 
 All three share one wrapper, `scripts/codex-critic.sh`, which runs a prompt on
-Codex in a **read-only sandbox** — and is the ONLY writer of approval markers
-and sidecars (`spec|plan|code` modes write them solely on `VERDICT: pass` with
-zero Critical/Important findings; `verify` re-validates a sidecar without any
-LLM call).
+Codex in a **read-only sandbox** and returns its VERDICT block.
 
-### The trust chain (1.6.0)
+### The loop (1.7.0)
 
 ```
-superlazy-brainstorm:  you ──▶ Fable drafts ──▶ Sol spec-critic ──▶ Fable plans
-                       ──▶ Sol plan-critic (+tier audit) ──▶ sidecar + HTML ──▶ STOP
-superlazy-build <plan>: verify sidecar ──▶ execute (Sonnet/Opus per task)
-                        ──▶ Sol code-critic ──▶ finish
+superlazy-brainstorm:  you ──▶ Fable drafts ──▶ Sol ──▶ Fable ──▶ Sol ──▶ Fable
+                       ──▶ plan + tasks.json + HTML ──▶ STOP
+superlazy-build <plan>: execute (Sonnet/Opus per task) ──▶ Sol reviews the diff
+                        ──▶ finish
 ```
 
-Approvals are hash-bound: `spec-critic.passed` records the spec's sha256,
-`plan-critic.passed` records plan+tasks+spec sha256s, and the execution gate
-recomputes all three (and requires the sdd invocation to name the approved
-plan via a structured `planPath=` argument) before allowing execution. Edit
-anything after approval → one re-bless pass, automatically. Tamper-evident,
-not tamper-proof: the adversary is drift, not malice.
+**Every critic loop is round-budgeted.** A critic that re-reads a document
+always finds one more `[Important]`, so drafter↔critic never converges on its
+own — left unbounded it will happily spend an afternoon on a small feature.
+Sol gets `CODEX_CRITIC_MAX_ROUNDS` passes per seam (default 2), then the
+drafter revises once more and **concludes**. Past the budget the wrapper
+refuses to spend a Codex call at all and prints `GATE: conclude`.
+
+There is no approval to verify, no marker, no hash. If you hand a plan to
+`superlazy-build`, it is done by definition — you are the one who reviewed it.
 
 ---
 
-## superlazy-build — verify, (re-)bless, execute
-
-Executes a Sol-approved plan, delegating planning to `superlazy-brainstorm`
-when none is given:
+## superlazy-build — execute the plan you were handed
 
 ```
-build <plan.md>:  verify sidecar ──▶ execute ──▶ SEAM 3 ──▶ finish
-                  (stale? one Sol re-bless — never a re-brainstorm)
-build <brief>:    superlazy-brainstorm --continue ──▶ execute ──▶ SEAM 3 ──▶ finish
+build <plan.md>:  execute ──▶ Sol reviews the diff ──▶ finish
+build <brief>:    superlazy-brainstorm --continue ──▶ execute ──▶ Sol ──▶ finish
 ```
-
-A `PreToolUse` hook gates execution: it recomputes the plan/tasks/spec hashes
-recorded in `plan-critic.passed` and requires the sdd invocation to name the
-approved plan via exactly one `planPath=` argument — post-approval edits and
-approved-A/executed-B swaps are both denied at the authorization point.
 
 ### Who runs what
 
 | Role | Model | Where |
 |---|---|---|
-| Planner/drafter | **Fable** | `superlazy-drafter` subagent (no write tools) |
-| Critic — all three seams | **Sol** (`gpt-5.6-sol`, pinned) | `codex-critic.sh spec\|plan\|code` |
+| Planner/drafter — always the last word | **Fable** | `superlazy-drafter` subagent (no write tools) |
+| Critic — all three seams, ≤2 rounds each | **Sol** (`gpt-5.6-sol`) | `codex-critic.sh spec\|plan\|code` |
 | mechanical / standard tasks | **Sonnet** (low / medium) | execution waves, via `model-routing.json` |
 | frontier tasks | **Opus** | execution waves |
 | Review pair | **Opus + Sol** | `superlazy-review` (the one fixed pair) |
@@ -88,16 +78,16 @@ approved-A/executed-B swaps are both denied at the authorization point.
 
 | Component | Role |
 |---|---|
-| `superlazy-build` (skill) | Coordinator that runs the pipeline. Invoke with your brief. |
-| `superlazy-spec-critic` (prompt) | SEAM 1 — reviews the design spec. Surfaces findings; does **not** auto-edit. |
-| `superlazy-plan-critic` (prompt) | SEAM 2 — reviews the plan. Auto-fixes, bounded to 2 rounds. |
-| `superlazy-code-critic` (prompt) | SEAM 3 — reviews implemented code vs the plan. Auto-fixes, bounded to 2 rounds. |
-| `codex-critic.sh` (script) | Runs a critic prompt on Codex (`codex exec -s read-only`) and returns its VERDICT block. |
-| `superlazy-build-gate.sh` (hook) | PreToolUse seam gate. No-op outside a run. |
+| `superlazy-brainstorm` (skill) | Plans with Fable + Sol, then stops. |
+| `superlazy-build` (skill) | Executes a plan. Invoke with a plan path or a brief. |
+| `superlazy-spec-critic` (prompt) | Reviews the design spec. Findings are intent decisions — surfaced, never auto-edited. |
+| `superlazy-plan-critic` (prompt) | Reviews the plan. ≤2 rounds, then Fable concludes. |
+| `superlazy-code-critic` (prompt) | Reviews implemented code vs the plan. ≤2 rounds, then you ship with what's open. |
+| `codex-critic.sh` (script) | Runs a critic prompt on Codex (`codex exec -s read-only`), returns its VERDICT block, appends a `GATE:` directive, and enforces the round budget. |
 
-The three critics run on **Codex/Sol** in a read-only sandbox — seam modes are
-pinned to Sol (env overrides ignored). The SCRIPT parses its own verdict and
-writes the markers; the coordinator can only route through them.
+The three critics run on **Codex/Sol** in a read-only sandbox. The script never
+edits anything and never blocks anything — it reports, and the round budget
+decides when the conversation is over.
 
 ### Usage
 
@@ -108,9 +98,7 @@ writes the markers; the coordinator can only route through them.
 ```
 
 Flags (build):
-- `--spec <path>` — spec location for re-bless when no sidecar names it.
-- `--skip-critics` — loud bypass: Fable still authors, but nothing is
-  approved (no sidecar), so a later normal build re-critiques.
+- `--skip-critics` — Sol never runs; Fable still authors everything.
 - `--serial` — opt out of wave parallelism during execution.
 
 ---
@@ -172,7 +160,9 @@ defaults are already sensible):
 | Variable | Default | Notes |
 |---|---|---|
 | `CODEX_CRITIC_MODEL` | `gpt-5.6-sol` | The "Sol" model. Set empty to use your Codex account default. On a ChatGPT-account Codex, `gpt-5-codex` is **not** available — `gpt-5.6-sol` is. |
-| `CODEX_CRITIC_EFFORT` | `high` | Reasoning effort (`minimal\|low\|medium\|high`). Adversarial review benefits from `high`. |
+| `CODEX_CRITIC_EFFORT` | `high` | Reasoning effort (`minimal\|low\|medium\|high`). Every round runs `high`: each Codex call is a fresh cold read, not a cheap re-read, and the last round is the final word before the drafter concludes. |
+| `CODEX_CRITIC_MAX_ROUNDS` | `2` | Critic passes per seam before the drafter concludes. Raise it if you want more argument, lower it to `1` for one look and done. |
+| `CODEX_CRITIC_ROUND` | `1` | Which round this call is; the coordinator increments it. Past `MAX_ROUNDS` the wrapper makes no Codex call and prints `GATE: conclude`. |
 | `CODEX_CRITIC_SEARCH` | `1` (on) | Live web search (`codex exec --search`) so critics verify current library APIs, CVEs, and breaking changes. Set `0` for faster/offline runs. |
 
 Reviewers also use the **Context7 MCP** (if configured in `~/.codex/config.toml`,
