@@ -1,6 +1,6 @@
 # superlazy-cc — three-command restructure — design spec
 
-Date: 2026-07-22 (rev 9 — components wording fix after spec-critic round 8 `targeted-fixes`, 1 Critical)
+Date: 2026-07-22 (rev 10 — byte-identity scoped to review/refute after plan-critic round 2 caught the contradiction)
 Status: approved (Seam 1 passed, spec-critic round 9, zero findings)
 Repo: `Sultan1993/lazypowers` (plugin `superlazy-cc`), version `1.5.0` → `1.6.0`
 
@@ -229,9 +229,13 @@ Critic modes (`spec`/`plan`/`code`):
   pass, and the brainstorm loop's "until the marker exists" condition is safe:
   every loop iteration re-runs the critic, and the marker present after a run is
   always the product of *that* run.
-- The script **captures** Codex output (no `exec`), prints it to stdout verbatim,
-  then parses it: VERDICT = first `^VERDICT:` line; Critical = count of
-  `^- \[Critical\]`; Important = count of `^- \[Important\]`.
+- Seam modes **capture** Codex output, print it, then parse it: VERDICT =
+  first `^VERDICT:` line; Critical = count of `^- \[Critical\]`; Important =
+  count of `^- \[Important\]`. **Byte-identity is scoped to `review`/`refute`**
+  (which remain `exec` pass-through — their JSON is consumed verbatim by
+  superlazy-review): seam-mode capture may normalize trailing newlines, which
+  is harmless because seam output is only ever VERDICT-parsed, never consumed
+  byte-wise. This scoping is deliberate.
 - **Clean** = the VERDICT token is exactly `pass` **AND** Critical == 0 AND
   Important == 0. Any other token (`targeted-fixes`, `rewrite`, `NEEDS-HUMAN`,
   garbled, missing) is not clean regardless of counts — the pass token and the
@@ -501,8 +505,9 @@ variants), so marker logic is exercised without the API.
 7b. `plan` mode, clean verdict, plan doc valid but `.tasks.json` diverges
    (same task count, one fence differs) → not clean, nothing written
    (equivalence check)
-8. no `MARKER_DIR` → stdout byte-identical to today's behavior; `review`/`refute`
-   modes untouched
+8. no `MARKER_DIR` → seam-mode stdout VERDICT-content-identical (trailing-newline
+   normalization permitted); `review`/`refute` byte-identical via `exec` —
+   cmp-tested against a stub payload lacking a trailing newline
 9. **edit-between-seams rejection**: `spec` mode passes (marker carries
    `specHash`), spec file is then edited, stubbed clean `plan` run → nothing
    written, mismatch on stderr
