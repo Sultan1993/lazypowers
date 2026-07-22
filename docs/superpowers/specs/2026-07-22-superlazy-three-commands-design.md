@@ -197,6 +197,16 @@ model; "Sol is the only critic" is a brief requirement, not a default).
 `review`/`refute` keep the env override — `superlazy-review`'s `--codex-model`
 flag depends on it. The test stub asserts the `-m` argument it receives.
 
+**Effort policy (wall-clock control).** A high-effort Sol round runs 5–9
+minutes; looping at all-high makes brainstorm too slow. Policy: each seam's
+FIRST pass runs at `high` (the broad adversarial sweep), re-review rounds run
+at `medium` (the what-changed note narrows the question). The coordinator sets
+`CODEX_CRITIC_EFFORT` per dispatch accordingly. An explicitly exported
+`CODEX_CRITIC_EFFORT` in the user's environment overrides the policy in BOTH
+directions (always-medium for speed, always-high for depth). Live web search
+stays on — the highest-value findings (platform-doc contract checks) come from
+it, including on re-review rounds.
+
 Critic modes (`spec`/`plan`/`code`):
 - Inputs: crafted context on stdin (unchanged). Env: `MARKER_DIR` (opt-in; absent
   → behave exactly as today), `SPEC_PATH` for `spec` mode (the file whose bytes
