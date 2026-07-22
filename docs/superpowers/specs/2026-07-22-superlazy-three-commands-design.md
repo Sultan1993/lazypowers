@@ -1,6 +1,6 @@
 # superlazy-cc — three-command restructure — design spec
 
-Date: 2026-07-22 (rev 6 — ownership/mutex consistency after spec-critic round 5 `targeted-fixes`, 0 Critical / 2 Important / 3 Minor)
+Date: 2026-07-22 (rev 7 — canonical-source binding after spec-critic round 6 `targeted-fixes`, 1 Critical)
 Status: in review (Seam 1)
 Repo: `Sultan1993/lazypowers` (plugin `superlazy-cc`), version `1.5.0` → `1.6.0`
 
@@ -138,6 +138,10 @@ Internal `--continue` flag: suppresses the hard stop; used only when
 - Step 1's invocation of `superpowers-extended-cc:brainstorming` is replaced by
   `superlazy-brainstorm --continue`, deleting the OVERRIDE prose at current
   `SKILL.md:90` and `SKILL.md:109`.
+- **The sdd invocation names the approved plan.** When build invokes
+  `Skill(subagent-driven-development)`, the invocation args MUST contain the
+  canonical plan path — the gate compares it to the marker's `planPath` and
+  denies on absence or mismatch (approved-A/executed-B protection).
 - **Seam 3** (`codex-critic.sh code`) always runs (except under `--skip-critics`).
   sdd's per-task Claude reviewers are kept (different layer, `standard` tier).
 - **`--skip-critics` — the one loud bypass, fully specified.** Announce
@@ -234,12 +238,17 @@ Critic modes (`spec`/`plan`/`code`):
   `SPEC_PATH` bytes** — a bare/legacy marker or a hash mismatch means the spec
   on disk is not the spec Seam 1 approved (edit-between-seams), so nothing is
   written and the mismatch is reported on stderr (the re-bless path supplies a
-  valid marker via `verify --spec-only`, below); (b) **validates `.tasks.json`
-  deterministically** before approving: every task parses, carries a
-  `json:metadata` fence with `modelTier` ∈ {mechanical, standard, frontier}, a
-  `files` array, a non-blank `verifyCommand`, and non-empty
-  `acceptanceCriteria` — any violation = not clean, nothing written, violations
-  listed on stderr. (This validation is what makes the tier guarantee real; the
+  valid marker via `verify --spec-only`, below); (b) **validates the task
+  schema on the CANONICAL TaskCreate source — the plan MARKDOWN** (upstream
+  sdd extracts and creates tasks from the plan doc; `.tasks.json` is its
+  persistence mirror, written later): every task block in `PLAN_PATH` parses,
+  carries a `json:metadata` fence with `modelTier` ∈ {mechanical, standard,
+  frontier}, a `files` array, a non-blank `verifyCommand`, and non-empty
+  `acceptanceCriteria`; (c) **validates plan/tasks equivalence**: task count
+  equal AND each `.tasks.json` task's fence byte-equal to its plan-doc
+  counterpart — equal-count-but-divergent artifacts are a violation. Any
+  (b)/(c) violation = not clean, nothing written, violations on stderr. (This
+  makes the tier guarantee real for the artifact sdd actually consumes; the
   upstream harness gate is only defense-in-depth, see Enforcement chain.)
 - Write order on clean `plan`: **sidecar first, `plan-critic.passed` last**
   (each temp-file + `mv -f` rename). The marker is what authorizes execution
@@ -312,7 +321,7 @@ residual counts. Tamper-evident, not tamper-proof (see threat model).
 | Plan seam passed, in order | sidecar then plan marker, written only when clean AND spec marker exists; marker last = execution authorized last | script |
 | Tier on every task | deterministic `.tasks.json` schema validation in `plan` mode — no valid `modelTier` on every task, no approval | script |
 | Cross-session approval | `verify` mode validates sidecar, mints session markers; `--spec-only` carries spec approval into re-bless | script |
-| Execution start | `superlazy-build-gate.sh` (ours — **modified**) denies `Skill(subagent-driven-development|executing-plans)` without `plan-critic.passed` in the session run dir; when the marker is JSON it recomputes `planHash`/`tasksHash` **and `specHash`** against the files it names and denies on any mismatch — post-approval edits to plan, tasks, OR spec are caught at the authorization point. EMPTY markers: existence-only (legacy). Non-empty malformed markers: **deny** (never downgraded) | hook |
+| Execution start | `superlazy-build-gate.sh` (ours — **modified**) denies `Skill(subagent-driven-development|executing-plans)` without `plan-critic.passed` in the session run dir; when the marker is JSON it (a) recomputes `planHash`/`tasksHash`/`specHash` against the files it names and denies on any mismatch, and (b) requires the Skill invocation's `tool_input` (args/prompt text) to CONTAIN the marker's `planPath` — an invocation that names a different plan, or none, is denied ("execution must name the approved plan"). A marker for plan A can therefore never authorize sdd consuming plan B. EMPTY markers: existence-only (legacy, no path binding). Non-empty malformed: **deny** | hook |
 | Tier/dispatch harness gates | `pre-taskcreate-model-tier` and `pre-agent-model-routing` are **defense-in-depth only** — by design they fail open (ad-hoc tasks without a fence allowed, malformed fence JSON allowed, concrete `model` pins exempt, several routing states allow). The tier *guarantee* lives in the script validation above, not in these hooks. | hook (fail-open) |
 
 Corrected claim from rev 1: the gate hook does **not** cover Seams 1–2 in the
@@ -447,7 +456,8 @@ self-check and ≤60-char subject rule are adopted in the drafter's output forma
   `plan` mode, tasks-schema validation, seam-mode model pinning,
   sidecar-then-marker writing, `verify` + `verify --spec-only` modes
 - `superlazy-cc/hooks/superlazy-build-gate.sh` — validate hash-bearing plan
-  markers (recompute plan/tasks/spec hashes + compare) before allowing
+  markers (recompute plan/tasks/spec hashes + compare, AND require the Skill
+  invocation text to contain the marker's `planPath`) before allowing
   execution; EMPTY markers keep existence-only legacy behavior; non-empty
   malformed markers deny
 - `superlazy-cc/skills/superlazy-build/SKILL.md` — plan resolution, verify/re-bless
@@ -479,9 +489,13 @@ variants), so marker logic is exercised without the API.
 6. `plan` mode, clean, with spec marker → sidecar written BEFORE plan marker
    (ordering observable via the stub pausing between writes or mtime), correct
    separate `planHash`/`tasksHash` + `specPath`/`specHash`/`commit`
-7. `plan` mode, clean verdict but tasks.json with a missing `modelTier` /
+7. `plan` mode, clean verdict but a plan-doc task with missing `modelTier` /
    blank `verifyCommand` / empty `acceptanceCriteria` → not clean, nothing
-   written, violation on stderr
+   written, violation on stderr (schema runs on the plan MARKDOWN — the
+   canonical TaskCreate source)
+7b. `plan` mode, clean verdict, plan doc valid but `.tasks.json` diverges
+   (same task count, one fence differs) → not clean, nothing written
+   (equivalence check)
 8. no `MARKER_DIR` → stdout byte-identical to today's behavior; `review`/`refute`
    modes untouched
 9. **edit-between-seams rejection**: `spec` mode passes (marker carries
@@ -508,9 +522,11 @@ existing hook tests):
 18. hash-bearing plan marker, files intact → allow
 19. one plan byte / one tasks byte / **one spec byte** flipped after approval
     (each independently) → deny
-20. EMPTY legacy marker → allow (existence-only compat)
+20. EMPTY legacy marker → allow (existence-only compat, no path binding)
 21. non-empty corrupt-JSON marker / JSON missing a required field → **deny**
     (no downgrade)
+22. hash-bearing marker for plan A, Skill invocation naming plan B (or naming
+    no plan at all) → **deny** (approved-A/executed-B)
 
 `plan-viz.test.mjs` (node:test, pure):
 fixtures for every detector — same-wave overlap, unknown `blockedBy`, cycle,

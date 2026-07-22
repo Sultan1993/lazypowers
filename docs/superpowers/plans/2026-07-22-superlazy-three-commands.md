@@ -68,16 +68,17 @@ if PLAN_PATH known; plan → rm plan marker + sidecar; code → rm code marker);
 capture output (`out=$(codex ...)`), print verbatim; parse clean = pass token
 + zero counts; on clean+MARKER_DIR: spec writes `{specPath,specHash}` marker;
 plan REQUIRES spec marker whose specHash matches current SPEC_PATH bytes, runs
-tasks.json schema validation (jq: every task fence parses, modelTier valid,
-files array, verifyCommand non-blank, acceptanceCriteria non-empty; violations
-→ stderr, not clean), then writes sidecar FIRST, plan marker LAST (mktemp same
-dir + mv -f). (3) `verify <plan>`: rm both markers; validate sidecar
+schema validation on the PLAN MARKDOWN's task fences (canonical TaskCreate
+source: modelTier valid, files array, verifyCommand non-blank,
+acceptanceCriteria non-empty) PLUS plan/tasks equivalence (count equal, each
+tasks.json fence byte-equal to its plan counterpart; violations → stderr, not
+clean), then writes sidecar FIRST, plan marker LAST (mktemp same dir + mv -f). (3) `verify <plan>`: rm both markers; validate sidecar
 planHash/tasksHash/specPath/specHash; ok → write both markers from sidecar,
 `VERIFIED`, exit 0 (commit drift → stderr warn); fail → exit 3.
 `--spec-only`: rm spec marker; validate spec fields only; mint spec marker or
 exit 3. (4) Tests: PATH-prepend `tests/stubs/codex` (prints canned VERDICT from
 `$CODEX_STUB_VERDICT` file, records argv to `$CODEX_STUB_ARGS`); implement
-spec acceptance cases 1–17 + model-pin assertion (case 11).
+spec acceptance cases 1–17 incl. 7b divergence + model-pin assertion (case 11).
 **Acceptance Criteria:**
 - cases 1–17 of the spec's matrix pass via `bash superlazy-cc/tests/codex-critic.test.sh`
 - review mode stdout unchanged; seam modes ignore `CODEX_CRITIC_MODEL`
@@ -96,15 +97,17 @@ after the `-f` check, read the marker; empty/whitespace-only → allow (legacy);
 non-empty → must parse as JSON with planPath/planHash/tasksHash/specPath/specHash
 (jq), else DENY "corrupt approval marker"; recompute sha256 of the three files
 (paths relative to repo root; missing file → deny) and deny on any mismatch
-with a message naming the changed file. Keep all other behavior identical.
+with a message naming the changed file; ALSO require the Skill invocation's
+tool_input text to contain the marker's planPath (absent/mismatch → deny —
+approved-A/executed-B). Keep all other behavior identical.
 Tests: crafted-stdin invocations (existing repo test pattern): spec cases
-18–21 (intact→allow; plan/tasks/spec byte flip→deny each; empty legacy→allow;
-corrupt JSON / missing field→deny).
+18–22 (intact→allow; plan/tasks/spec byte flip→deny each; empty legacy→allow;
+corrupt JSON / missing field→deny; invocation naming plan B or no plan→deny).
 **Acceptance Criteria:** cases 18–21 pass; writing-plans arm untouched
 **Verify:** `bash superlazy-cc/tests/build-gate.test.sh`
 
 ```json:metadata
-{"files": ["superlazy-cc/hooks/superlazy-build-gate.sh", "superlazy-cc/tests/build-gate.test.sh"], "modelTier": "standard", "verifyCommand": "bash superlazy-cc/tests/build-gate.test.sh", "acceptanceCriteria": ["hash recompute + deny on mismatch incl. spec", "empty marker legacy allow", "malformed marker deny", "cases 18-21 pass"]}
+{"files": ["superlazy-cc/hooks/superlazy-build-gate.sh", "superlazy-cc/tests/build-gate.test.sh"], "modelTier": "standard", "verifyCommand": "bash superlazy-cc/tests/build-gate.test.sh", "acceptanceCriteria": ["hash recompute + deny on mismatch incl. spec", "invocation-path binding", "empty marker legacy allow", "malformed marker deny", "cases 18-22 pass"]}
 ```
 
 ### Task 4: plan-viz — generator + tests
@@ -205,7 +208,8 @@ plan: invoke Skill `superlazy-cc:superlazy-brainstorm` with `--continue`
 (replaces Step 1 + old OVERRIDE prose at :90/:109 — DELETE both). REMOVE Step
 0.5 seam-tracker TaskCreate. Keep Steps 5–7 (execution, Seam 3 via
 `MARKER_DIR` so code marker writes, finish) intact including wave policy;
-execution materializes nothing — sdd owns TaskCreate. Update VERDICT parser to
+execution materializes nothing — sdd owns TaskCreate, and the sdd Skill
+invocation MUST name the canonical plan path (gate binds it). Update VERDICT parser to
 pass-token semantics. Effort policy: first pass per seam high, re-reviews
 medium, user-exported `CODEX_CRITIC_EFFORT` wins.
 **Acceptance Criteria:** greps below; OVERRIDE prose gone; no TaskCreate
