@@ -1,6 +1,6 @@
 # superlazy-cc — three-command restructure — design spec
 
-Date: 2026-07-22 (rev 8 — structured plan binding + effort-policy tests after spec-critic round 7 `targeted-fixes`, 1 Critical / 2 Important)
+Date: 2026-07-22 (rev 9 — components wording fix after spec-critic round 8 `targeted-fixes`, 1 Critical)
 Status: in review (Seam 1)
 Repo: `Sultan1993/lazypowers` (plugin `superlazy-cc`), version `1.5.0` → `1.6.0`
 
@@ -460,10 +460,11 @@ self-check and ≤60-char subject rule are adopted in the drafter's output forma
   `plan` mode, tasks-schema validation, seam-mode model pinning,
   sidecar-then-marker writing, `verify` + `verify --spec-only` modes
 - `superlazy-cc/hooks/superlazy-build-gate.sh` — validate hash-bearing plan
-  markers (recompute plan/tasks/spec hashes + compare, AND require the Skill
-  invocation text to contain the marker's `planPath`) before allowing
-  execution; EMPTY markers keep existence-only legacy behavior; non-empty
-  malformed markers deny
+  markers (recompute plan/tasks/spec hashes + compare) AND extract exactly one
+  `planPath=` token from `.tool_input.args`, canonicalize both values, and
+  require exact equality with the marker's `planPath` — never substring-search
+  the invocation text. EMPTY markers keep existence-only legacy behavior;
+  non-empty malformed markers deny
 - `superlazy-cc/skills/superlazy-build/SKILL.md` — plan resolution, verify/re-bless
   paths, brainstorm delegation, OVERRIDE prose removal
 - `superlazy-cc/skills/superlazy-review/SKILL.md` — explicit model passing, opus default
