@@ -135,6 +135,12 @@ json.dump({'planPath':'docs/plan.md','tasks':[{'id':0,'subject':'Task 1: t','sta
 V "${CLEAN[@]}"; run spec SPEC_PATH="$SPEC"
 V "${CLEAN[@]}"; run plan SPEC_PATH="$SPEC" PLAN_PATH="$PLAN"
 check "7e auxiliary H3 beside a valid task still approves" '[ -s "$SIDE" ]'
+# 7f: a '### Task' heading INSIDE a fenced code example is not a section
+rm -f run/* "$SIDE"
+printf 'Spec: docs/spec.md\n\nExample only:\n\n```markdown\n### Task 1: fenced example\n```\n\n```json:metadata\n%s\n```\n' "$FENCE" > "$PLAN"
+V "${CLEAN[@]}"; run spec SPEC_PATH="$SPEC"
+V "${CLEAN[@]}"; run plan SPEC_PATH="$SPEC" PLAN_PATH="$PLAN"
+check "7f fenced ### Task heading yields no-sections rejection" '[ ! -e "$SIDE" ] && grep -q "no .### Task. sections" err.txt'
 write_plan "$FENCE"
 
 # --- case 7b: equivalence violation → nothing ----------------------------------------

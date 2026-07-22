@@ -73,18 +73,31 @@ import json, re, sys
 plan_path, tasks_path = sys.argv[1], sys.argv[2]
 errs = []
 src = open(plan_path, encoding='utf-8').read()
-# Parse per TASK SECTION — ONLY headings matching '### Task\b' count as tasks;
-# auxiliary H3 sections (### Notes, ### Context, ...) neither count as tasks
-# nor invalidate valid ones. A global fence count could let a fence-less
-# section hide behind a double-fenced sibling or a header fence.
-sections = [sec for sec in re.split(r'^### ', src, flags=re.M)[1:]
-            if re.match(r'Task\b', sec)]
+# Parse per TASK SECTION with a FENCE-AWARE line walk — a heading only counts
+# when it is not inside a ``` code fence (a fenced '### Task' example must not
+# mint approval), and ONLY '### Task\b' headings start a section; auxiliary H3
+# sections (### Notes, ...) neither count as tasks nor invalidate valid ones.
+lines = src.splitlines()
+sections = []          # list of [start, end) line ranges
+in_code = False
+cur = None
+for n, line in enumerate(lines):
+    if line.startswith('```'):
+        in_code = not in_code
+        continue
+    if in_code:
+        continue
+    if re.match(r'^### Task\b', line):
+        if cur is not None: sections.append((cur, n))
+        cur = n
+    elif re.match(r'^##+ ', line):  # any other unfenced H2/H3 ends a section
+        if cur is not None: sections.append((cur, n)); cur = None
+if cur is not None: sections.append((cur, len(lines)))
 if not sections:
     errs.append("plan markdown contains no '### Task' sections")
 fences_md = []
-for i, sec in enumerate(sections):
-    # body ends at the next H2 or H3 heading (auxiliary H3s excluded above)
-    body = re.split(r'^##+ ', sec, flags=re.M)[0]
+for i, (a, b) in enumerate(sections):
+    body = '\n'.join(lines[a:b])
     found = re.findall(r'```json:metadata\n(.*?)\n```', body, re.S)
     if len(found) != 1:
         errs.append(f"plan task section {i}: expected exactly one json:metadata fence, found {len(found)}")
