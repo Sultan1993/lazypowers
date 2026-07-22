@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, normalizePath, extractFence } from './plan-viz.mjs';
+import { analyze, normalizePath, extractFence, parsePlanMarkdown, mdToHtml } from './plan-viz.mjs';
 
 // fixture helper: task with a valid fence unless overridden
 const T = (id, over = {}, fence = {}) => ({
@@ -86,4 +86,80 @@ test('normalizePath', () => {
 test('extractFence tolerates garbage', () => {
   assert.equal(extractFence('no fence'), null);
   assert.equal(extractFence('```json:metadata\n{broken\n```'), null);
+});
+
+// --- plan markdown <-> tasks.json equivalence -----------------------------------
+// build executes tasks.json while the reader reads the markdown; if they drift
+// the page shows one task's metadata under another's heading, silently.
+
+const MD = `Spec: s.md
+
+# demo
+
+### Task 0: alpha
+**Goal:** first.
+
+\`\`\`json:metadata
+{"files":["src/f0.js"],"modelTier":"mechanical","verifyCommand":"true","acceptanceCriteria":["a"]}
+\`\`\`
+
+### Task 1: beta
+**Goal:** second.
+
+\`\`\`json:metadata
+{"files":["src/f1.js"],"modelTier":"mechanical","verifyCommand":"true","acceptanceCriteria":["a"]}
+\`\`\`
+`;
+
+test('parsePlanMarkdown splits sections, fields and fences', () => {
+  const p = parsePlanMarkdown(MD);
+  assert.equal(p.tasks.length, 2);
+  assert.equal(p.tasks[0].heading, 'Task 0: alpha');
+  assert.equal(p.tasks[0].fields.goal, 'first.');
+  assert.match(p.tasks[0].fence, /src\/f0\.js/);
+  assert.match(p.intro, /# demo/);
+});
+
+test('a fenced ### Task example does not mint a task section', () => {
+  const p = parsePlanMarkdown('# t\n\n```\n### Task 9: not real\n```\n\n### Task 0: real\n**Goal:** g\n');
+  assert.deepEqual(p.tasks.map(t => t.heading), ['Task 0: real']);
+});
+
+test('matching plan and tasks.json report no drift', () => {
+  const p = parsePlanMarkdown(MD);
+  const a = analyze(plan([T(0, { subject: 'Task 0: alpha' }), T(1, { subject: 'Task 1: beta' })]), p.tasks);
+  assert.deepEqual(kinds(a).filter(k => k.startsWith('plan-tasks')), []);
+});
+
+test('reordered tasks.json flagged as order mismatch', () => {
+  const p = parsePlanMarkdown(MD);
+  const a = analyze(plan([T(0, { subject: 'Task 1: beta' }), T(1, { subject: 'Task 0: alpha' })]), p.tasks);
+  assert.deepEqual(kinds(a).filter(k => k.startsWith('plan-tasks')),
+    ['plan-tasks-order-mismatch', 'plan-tasks-order-mismatch']);
+});
+
+test('task count divergence flagged', () => {
+  const p = parsePlanMarkdown(MD);
+  const a = analyze(plan([T(0, { subject: 'Task 0: alpha' })]), p.tasks);
+  assert.ok(kinds(a).includes('plan-tasks-count-mismatch'));
+});
+
+test('same subject but edited metadata flagged as fence drift', () => {
+  const p = parsePlanMarkdown(MD);
+  const a = analyze(plan([
+    T(0, { subject: 'Task 0: alpha' }, { verifyCommand: 'rm -rf /' }),
+    T(1, { subject: 'Task 1: beta' }),
+  ]), p.tasks);
+  assert.deepEqual(kinds(a).filter(k => k.startsWith('plan-tasks')), ['plan-tasks-fence-drift']);
+});
+
+test('no markdown available: drift checks stay silent', () => {
+  const a = analyze(plan([T(0), T(1)]), null);
+  assert.deepEqual(kinds(a).filter(k => k.startsWith('plan-tasks')), []);
+});
+
+test('unsafe link schemes are not rendered as hrefs', () => {
+  assert.match(mdToHtml('see [x](javascript:alert(1))'), /x \(javascript:/);
+  assert.doesNotMatch(mdToHtml('see [x](javascript:alert(1))'), /href/);
+  assert.match(mdToHtml('see [x](https://example.com)'), /href="https:\/\/example\.com"/);
 });

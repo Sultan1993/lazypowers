@@ -36,7 +36,7 @@ converges on its own — the budget is the whole point. Pass
 
 | `GATE:` | What you do |
 |---|---|
-| `pass` | Clean. Move to the next step. |
+| `pass` | Clean — the critic said `pass` AND no findings parsed. Move on. |
 | `revise` | Show findings to the user, dispatch Fable to revise, re-run at `ROUND+1`. |
 | `final` | Last critic pass. Fable revises once, addressing what it can. Then MOVE ON. |
 | `conclude` | Budget already spent; no Codex call was made. Move on immediately. |
@@ -45,6 +45,12 @@ converges on its own — the budget is the whole point. Pass
 Never re-run a seam after `final` or `conclude`. Never reset `CODEX_CRITIC_ROUND`
 to 1 to buy extra passes. Never argue a finding on Fable's behalf. If the user
 wants another round they will ask; that is their call, not yours.
+
+`CODEX_CRITIC_ROUND` must be a literal positive integer — `1`, then `2`. The
+wrapper exits 2 with `VERDICT: NEEDS-HUMAN` on anything else (including the
+`<1,2>` placeholder below, copied verbatim). Also read stderr on every call: it
+may warn that the critic's findings were in a format the wrapper cannot count,
+which means you must read the verdict body yourself rather than trust the gate.
 
 ## Step 0 — Preflight
 1. `[ -z "${CLAUDE_CODE_SUBAGENT_MODEL:-}" ] || [ "$CLAUDE_CODE_SUBAGENT_MODEL" = "fable" ]`
@@ -113,6 +119,13 @@ waves they run in. It is what the user reads instead of the markdown; the
 structural checks are a collapsed footnote, not the subject. The local
 self-contained file is the deliverable. (You MAY additionally publish it via
 the Artifact tool if available — never required.)
+
+If it prints structural problems on stderr, they go in your Step 7 summary
+verbatim. `plan-tasks-order-mismatch` / `-count-mismatch` / `-fence-drift` mean
+YOUR `.tasks.json` derivation disagrees with Fable's markdown — build executes
+the JSON while the user reads the page, so fix the derivation and re-run the
+viz before stopping. `no-verify` / `no-criteria` / `bad-tier` are Fable's to
+fix. Nothing blocks here, but shipping an unreported problem is not an option.
 
 ## Step 7 — Hard stop
 Print the paths: spec, plan, tasks.json, HTML. If any seam ended on `final` or

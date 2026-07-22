@@ -1,7 +1,7 @@
 {
   "name": "superlazy-cc",
   "description": "Three-command, two-model development pipeline: superlazy-brainstorm (Fable drafts the spec+plan, Sol/Codex critiques each at most twice, Fable concludes, HTML plan review, hard stop), superlazy-build (executes the plan you hand it — waves of concurrent subagents, per-task model routing, Sol reviews the diff), and superlazy-review (Opus + Sol two-model adversarial code review). Every critic loop is round-budgeted so drafter and critic cannot argue indefinitely. Drives the superpowers-extended-cc skills (must be installed/enabled).",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "author": {
     "name": "Sultan1993 (fork of qrotux)"
   },

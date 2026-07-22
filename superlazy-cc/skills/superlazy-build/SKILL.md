@@ -21,12 +21,16 @@ your job starts after that.
 ## Codex critic — how to run the code seam
 ```bash
 WRAP=$(ls -d ~/.claude/plugins/cache/*/superlazy-cc/*/scripts/codex-critic.sh 2>/dev/null | sort -V | tail -1)
+VIZ=$(ls -d ~/.claude/plugins/cache/*/superlazy-cc/*/skills/superlazy-brainstorm/lib/plan-viz.mjs 2>/dev/null | sort -V | tail -1)
 ```
 - Read-only: the wrapper runs `codex exec -s read-only`. All FIXING stays with
   the coordinator.
-- Round budget: pass `CODEX_CRITIC_ROUND`. Sol reviews at most
-  `CODEX_CRITIC_MAX_ROUNDS` (default 2) times, then you fix what you can and
-  finish. Read the trailing `GATE:` line; never reset the round to buy passes.
+- Round budget: pass `CODEX_CRITIC_ROUND` as a literal positive integer (`1`,
+  then `2`) — anything else exits 2 with `VERDICT: NEEDS-HUMAN`. Sol reviews at
+  most `CODEX_CRITIC_MAX_ROUNDS` (default 2) times, then you fix what you can
+  and finish. Read the trailing `GATE:` line; never reset the round to buy
+  passes. Read stderr too: it warns when findings were in a format the wrapper
+  could not count, meaning you must read the verdict body yourself.
 - Every round runs at `high` effort. Do not set `CODEX_CRITIC_EFFORT` yourself.
 - Requires the `codex` CLI installed + authenticated (`codex login`).
 
@@ -44,11 +48,27 @@ parallel runs MUST each live in their own git worktree.
 ## Step 0 — Classify the argument (artifact-driven, never phrasing)
 Extract a file path from the argument if present.
 ```
-<X>.md with an <X>.md.tasks.json sibling  →  PLAN   (Step E) — brainstorm is NEVER called
+<X>.md with an <X>.md.tasks.json sibling  →  PLAN   (Step 0.5) — brainstorm is NEVER called
 anything else, or no path                 →  BRIEF  (Step B)
 ```
 Announce which branch you took in one line, so a wrong classification is caught
 immediately.
+
+## Step 0.5 — Read the plan before executing it (PLAN branch only)
+```bash
+node "$VIZ" "<plan path>"    # writes the HTML page, prints structural problems on stderr
+```
+A plan handed straight to build may never have been through brainstorm, so
+nothing has ever checked it. This is not a gate — it is looking before you act:
+- `cycle` / unschedulable → STOP. Those tasks cannot be ordered, so execution
+  would stall or run them in a wrong order. Show the user and stop.
+- `plan-tasks-order-mismatch` / `-count-mismatch` / `-fence-drift` → STOP. The
+  markdown and the `.tasks.json` disagree, and you are about to execute the
+  JSON. Show the user both versions and let them say which is right.
+- `no-verify` / `no-criteria` / `bad-tier` / `file-overlap` → report them and
+  continue; the user decides. `file-overlap` in particular means those tasks
+  must not share a wave — serialize them at Step E.
+If the file cannot be parsed at all, stop and say so; do not guess at a repair.
 
 ## Step B — No plan: brainstorm inline, then execute
 Invoke Skill `superlazy-cc:superlazy-brainstorm` with `--continue` and the

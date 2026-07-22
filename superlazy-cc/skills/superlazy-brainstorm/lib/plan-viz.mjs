@@ -114,10 +114,47 @@ export function computeStats(tasks, waves) {
   return { tasks: tasks.length, waves: waves.length, tiers };
 }
 
-export function analyze(tasksJson) {
+// The plan markdown is the source; tasks.json is its hand-derived mirror, and
+// build executes the JSON while you read the markdown. If they drift, the page
+// pairs one task's heading with another's metadata and nothing looks wrong —
+// so check the pairing explicitly. (1.6.0 enforced this as an approval gate;
+// here it is a reported finding, which is the same information without the gate.)
+export function detectPlanDrift(tasks, planTasks) {
+  if (!Array.isArray(planTasks) || planTasks.length === 0) return [];
+  const problems = [];
+  const norm = s => String(s ?? '').replace(/\s+/g, ' ').trim();
+  if (planTasks.length !== tasks.length) {
+    problems.push({
+      kind: 'plan-tasks-count-mismatch', task: null,
+      detail: `plan markdown has ${planTasks.length} task sections, tasks.json has ${tasks.length} — the page and the executed plan are not the same set`,
+    });
+  }
+  const n = Math.min(planTasks.length, tasks.length);
+  for (let i = 0; i < n; i++) {
+    if (norm(planTasks[i].heading) !== norm(tasks[i].subject)) {
+      problems.push({
+        kind: 'plan-tasks-order-mismatch', task: tasks[i].id,
+        detail: `position ${i}: plan markdown says "${norm(planTasks[i].heading)}", tasks.json says "${norm(tasks[i].subject)}" — metadata is being shown against the wrong task`,
+      });
+    } else if (planTasks[i].fence && !sameFence(planTasks[i].fence, tasks[i].fence)) {
+      problems.push({
+        kind: 'plan-tasks-fence-drift', task: tasks[i].id,
+        detail: `json:metadata differs between the plan markdown and tasks.json — build executes the tasks.json version, not the one on this page`,
+      });
+    }
+  }
+  return problems;
+}
+
+function sameFence(rawMd, parsedJson) {
+  try { return JSON.stringify(JSON.parse(rawMd)) === JSON.stringify(parsedJson); }
+  catch { return false; }
+}
+
+export function analyze(tasksJson, planTasks = null) {
   const tasks = parseTasks(tasksJson);
   const { waves, unschedulable, problems: waveProblems } = computeWaves(tasks);
-  const problems = [...waveProblems, ...detectProblems(tasks, waves)];
+  const problems = [...waveProblems, ...detectProblems(tasks, waves), ...detectPlanDrift(tasks, planTasks)];
   return { stats: computeStats(tasks, waves), waves, unschedulable, problems, tasks };
 }
 
@@ -139,10 +176,14 @@ export function parsePlanMarkdown(src) {
 
   const intro = lines.slice(0, ranges.length ? ranges[0][0] : lines.length).join('\n');
   const trailing = ranges.length ? lines.slice(ranges[ranges.length - 1][1]).join('\n') : '';
-  const tasks = ranges.map(([a, b]) => ({
-    heading: lines[a].replace(/^###\s*/, '').trim(),
-    ...splitFields(lines.slice(a + 1, b).join('\n')),
-  }));
+  const tasks = ranges.map(([a, b]) => {
+    const body = lines.slice(a + 1, b).join('\n');
+    return {
+      heading: lines[a].replace(/^###\s*/, '').trim(),
+      fence: /```json:metadata\n([\s\S]*?)\n```/.exec(body)?.[1] ?? null,
+      ...splitFields(body),
+    };
+  });
   return { intro, trailing, tasks };
 }
 
@@ -165,10 +206,15 @@ export function splitFields(body) {
 
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// Content here is LLM-authored and the page may be published, so only http(s)
+// and in-page anchors become links; anything else renders as plain text.
+const safeHref = u => /^(https?:\/\/|#|\.{0,2}\/)/i.test(u) ? u : null;
+
 const mdInline = s => esc(s)
   .replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+  .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, text, url) =>
+    safeHref(url) ? `<a href="${url}">${text}</a>` : `${text} (${url})`);
 
 // Enough markdown for what plans actually contain: fenced code, lists,
 // headings, paragraphs, inline code/bold/links. Not a spec-compliant parser.
@@ -351,19 +397,27 @@ function main(argv) {
   const planPath = argv.find(a => !a.startsWith('--'));
   if (!planPath) { console.error('usage: plan-viz.mjs <plan.md> [--json]'); process.exit(1); }
   const tasksJson = JSON.parse(readFileSync(planPath + '.tasks.json', 'utf8'));
-  const analysis = analyze(tasksJson);
+  // Content lives in the markdown; degrade to graph-only if it is missing.
+  const plan = existsSync(planPath)
+    ? parsePlanMarkdown(readFileSync(planPath, 'utf8'))
+    : { intro: '', trailing: '', tasks: [] };
+  const analysis = analyze(tasksJson, plan.tasks);
   if (jsonMode) {
     const { stats, waves, problems } = analysis;
     console.log(JSON.stringify({ stats, waves, problems }, null, 1));
     return;
   }
-  // Content lives in the markdown; degrade to graph-only if it is missing.
-  const plan = existsSync(planPath)
-    ? parsePlanMarkdown(readFileSync(planPath, 'utf8'))
-    : { intro: '', trailing: '', tasks: [] };
   const out = planPath + '.html';
   writeFileSync(out, renderHTML(planPath, analysis, plan));
   console.log(out);
+  // stdout stays the path alone (callers consume it); findings go to stderr so
+  // a coordinator that only reads the path still cannot miss them.
+  if (analysis.problems.length) {
+    console.error(`plan-viz: ${analysis.problems.length} structural problem(s) — REPORT THESE TO THE USER:`);
+    for (const p of analysis.problems) {
+      console.error(`  [${p.kind}]${p.task !== null && p.task !== undefined ? ` task ${p.task}` : ''} — ${p.detail}`);
+    }
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main(process.argv.slice(2));

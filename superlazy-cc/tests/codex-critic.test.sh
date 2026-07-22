@@ -69,6 +69,33 @@ done
 run review CODEX_CRITIC_ROUND=9 CODEX_CRITIC_MAX_ROUNDS=2
 check "5f review ignores the budget"          '[ -f args.txt ] && ! grep -q "^GATE:" out.txt'
 
+echo "--- a non-clean token is never a pass, however findings are formatted ---"
+# Regression: a count-only gate reported this as clean.
+V "VERDICT: rewrite" "SUMMARY: fundamentally broken" "FINDINGS:" "* [Critical] wrong model — corrupts on write"
+run spec CODEX_CRITIC_ROUND=1 CODEX_CRITIC_MAX_ROUNDS=2
+check "10a unparsed findings + bad token -> revise" '[ "$(gate)" = revise ]'
+check "10b warns the body must be read"             'grep -q "READ THE VERDICT BODY" err.txt'
+V "VERDICT: targeted-fixes" "FINDINGS:" "- (none)"
+run spec CODEX_CRITIC_ROUND=2 CODEX_CRITIC_MAX_ROUNDS=2
+check "10c non-pass token at last round -> final"   '[ "$(gate)" = final ]'
+V "VERDICT: PASS" "FINDINGS:" "- (none)"
+run spec
+check "10d token match is case-insensitive"         '[ "$(gate)" = pass ]'
+
+echo "--- a malformed round must stop, never silently unbound the loop ---"
+V "${IMPORTANT[@]}"
+for bad in two junk 0 -1 1.5 ""; do
+  run spec CODEX_CRITIC_ROUND="$bad"
+  if [ "$bad" = "" ]; then
+    check "11 empty ROUND defaults to 1"            '[ "$(gate)" = revise ]'
+  else
+    check "11 ROUND='$bad' -> exit 2, no GATE"      '[ "$(cat rc.txt)" = 2 ] && ! grep -q "^GATE:" out.txt'
+  fi
+done
+run spec CODEX_CRITIC_MAX_ROUNDS=nope
+check "11 MAX_ROUNDS non-numeric -> exit 2"         '[ "$(cat rc.txt)" = 2 ]'
+check "11 malformed round spends no codex call"     '[ ! -f args.txt ]'
+
 echo "--- broken codex is never a pass ---"
 V "VERDICT: NEEDS-HUMAN" "SUMMARY: s"
 run spec

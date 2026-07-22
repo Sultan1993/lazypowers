@@ -45,6 +45,13 @@ EFFORT="${CODEX_CRITIC_EFFORT:-high}"
 
 fail() { echo "VERDICT: NEEDS-HUMAN"; echo "codex-critic: $1" >&2; exit 2; }
 
+# A non-numeric round silently DISABLES the budget: `[ junk -gt 2 ]` errors,
+# the test reads false, and the loop runs forever. Refuse loudly instead —
+# a malformed invocation must stop the pipeline, never quietly unbound it.
+is_pos_int() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "$1" -ge 1 ]; }
+is_pos_int "$MAX_ROUNDS" || fail "CODEX_CRITIC_MAX_ROUNDS must be a positive integer, got '$MAX_ROUNDS'"
+is_pos_int "$ROUND"      || fail "CODEX_CRITIC_ROUND must be a positive integer, got '$ROUND'"
+
 # Budget spent — refuse the call outright. This is the hard stop that keeps one
 # seam from eating an afternoon: no Codex call, no findings, nothing left to
 # argue about. Whatever the drafter wrote last is the deliverable.
@@ -97,18 +104,29 @@ fi
 printf '%s\n' "$out"
 
 # ---- GATE directive: what the coordinator does next --------------------------
-# Counts are authoritative; the self-reported token only matters for NEEDS-HUMAN.
+# Clean requires BOTH the `pass` token AND zero parsed findings. Counting alone
+# is not enough: a critic that formats a finding as `* [Critical]` instead of
+# `- [Critical]` parses as zero, and a count-only gate would report a verdict of
+# "rewrite — fundamentally broken" as clean. The two signals are deliberately
+# redundant because they fail independently.
 # NOTE: grep exits 1 on no-match and pipefail is on — the `|| true` is what
 # keeps a garbled verdict reaching the needs-human branch instead of killing us.
 verdict_line="$(printf '%s\n' "$out" | grep -m1 '^VERDICT:' || true)"
-token="$(printf '%s' "$verdict_line" | sed -n 's/^VERDICT:[[:space:]]*\([a-zA-Z-]*\).*/\1/p')"
+token="$(printf '%s' "$verdict_line" | sed -n 's/^VERDICT:[[:space:]]*\([a-zA-Z-]*\).*/\1/p' | tr '[:upper:]' '[:lower:]')"
 crit=$(printf '%s\n' "$out" | grep -c '^- \[Critical\]' || true)
 imp=$(printf '%s\n' "$out" | grep -c '^- \[Important\]' || true)
 
-if [ "$token" = "NEEDS-HUMAN" ] || [ -z "$token" ]; then
+# Token says not-clean but nothing parsed: our parser and the critic disagree,
+# so trust the critic and make the coordinator read the body itself.
+if [ "$token" != "pass" ] && [ "$token" != "needs-human" ] && [ -n "$token" ] \
+   && [ "$crit" -eq 0 ] && [ "$imp" -eq 0 ]; then
+  echo "codex-critic: verdict token is '$token' but no '- [Critical]/[Important]' lines parsed — the critic's findings are in a format this wrapper does not count. READ THE VERDICT BODY; do not treat it as clean." >&2
+fi
+
+if [ "$token" = "needs-human" ] || [ -z "$token" ]; then
   echo "GATE: needs-human"
   echo "codex-critic: critic returned no usable verdict (token='$token') — surface the raw output, do not treat as clean." >&2
-elif [ "$crit" -eq 0 ] && [ "$imp" -eq 0 ]; then
+elif [ "$token" = "pass" ] && [ "$crit" -eq 0 ] && [ "$imp" -eq 0 ]; then
   echo "GATE: pass"
 elif [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
   echo "GATE: final"
