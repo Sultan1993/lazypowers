@@ -71,7 +71,9 @@ tie-break = spec completeness), non-blank `verifyCommand`, non-empty
 **Goal:** Rewrite the wrapper per the interface contract; add stub-based tests.
 **Files:** Modify `superlazy-cc/scripts/codex-critic.sh`; create
 `superlazy-cc/tests/codex-critic.test.sh`, `superlazy-cc/tests/stubs/codex`
-**Steps:** (1) review/refute remain BYTE-PERFECT pass-through via `exec` — no
+**Steps:** (0) TDD: write `tests/codex-critic.test.sh` cases FIRST against the
+current script and run them — the marker/verify cases MUST fail (red) before
+any script change; implement; re-run the same command until green. (1) review/refute remain BYTE-PERFECT pass-through via `exec` — no
 capture (command substitution strips trailing newlines); regression test 8d
 compares output bytes via `cmp` against a stub payload with no trailing
 newline. Seam modes capture (they must parse after printing); trailing-newline
@@ -106,7 +108,9 @@ effort/search propagation (case 11b).
 **Goal:** `superlazy-build-gate.sh` validates hash-bearing plan markers.
 **Files:** Modify `superlazy-cc/hooks/superlazy-build-gate.sh`; create
 `superlazy-cc/tests/build-gate.test.sh`
-**Steps:** In the execution arm (`*subagent-driven-development*|*executing-plans*`):
+**Steps:** TDD: write `tests/build-gate.test.sh` cases 18–22 FIRST and run them —
+the hash/binding cases MUST fail against the unmodified hook (red); implement;
+re-run until green. In the execution arm (`*subagent-driven-development*|*executing-plans*`):
 after the `-f` check, read the marker; empty/whitespace-only → allow (legacy);
 non-empty → must parse as JSON with planPath/planHash/tasksHash/specPath/specHash
 (jq), else DENY "corrupt approval marker"; recompute sha256 of the three files
@@ -129,7 +133,9 @@ corrupt JSON / missing field→deny; planPath= arg naming B / extending A's file
 **Goal:** Pure-node plan visualizer with deterministic detectors.
 **Files:** Create `superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.mjs`,
 `superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.test.mjs`
-**Steps:** Input plan.md + `<plan>.md.tasks.json`. Parse each task's
+**Steps:** TDD: write `plan-viz.test.mjs` fixtures FIRST; `node --test` MUST
+fail with module-not-found (red); implement `plan-viz.mjs`; re-run until green.
+Input plan.md + `<plan>.md.tasks.json`. Parse each task's
 `json:metadata` fence from its description (missing/unparseable fence = problem
 `no-metadata`). Detectors (exact spec semantics): Kahn wave layering over
 blockedBy; unknown ref → problem `unknown-dep`, edge ignored; Kahn leftovers →
@@ -241,14 +247,14 @@ medium, user-exported `CODEX_CRITIC_EFFORT` wins.
 **Steps:** plugin.json → `"version": "1.6.0"`, description mentions the three
 commands. README: three-command structure, quick-start per command, approval
 sidecar explanation, model table (Fable/Sol/sonnet/opus), escape valves.
-Then run EVERYTHING: both shell test suites, both node:test suites, all static
-grep assertions from the spec's matrix (drafter frontmatter, opus agents,
-SKILL wiring, no-TaskCreate in both new SKILLs).
+Then run EVERYTHING — the barrier re-executes every prior task's own Verify
+command verbatim (Tasks 1–8), then the four suites. The full static matrix is
+therefore the UNION of the per-task Verify commands, not a summary of them.
 **Acceptance Criteria:** all suites green; version 1.6.0; README covers three commands
-**Verify:** `bash -c 'set -e; bash superlazy-cc/tests/codex-critic.test.sh >/dev/null; bash superlazy-cc/tests/build-gate.test.sh >/dev/null; node --test superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.test.mjs superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs >/dev/null; grep -q "\"version\": \"1.6.0\"" superlazy-cc/.claude-plugin/plugin.json; grep -q superlazy-brainstorm README.md; grep -q "model: fable" superlazy-cc/agents/superlazy-drafter.md; grep -q "^model: opus" superlazy-cc/agents/superlazy-review-critic.md; grep -q "^model: opus" superlazy-cc/agents/superlazy-refute-critic.md; grep -qi "tier" superlazy-cc/agents/superlazy-plan-critic.md'`
+**Verify:** run each of Task 1–8's Verify commands verbatim (all must pass), then: `bash -c 'set -e; bash superlazy-cc/tests/codex-critic.test.sh >/dev/null; bash superlazy-cc/tests/build-gate.test.sh >/dev/null; node --test superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.test.mjs superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs >/dev/null; grep -q "\"version\": \"1.6.0\"" superlazy-cc/.claude-plugin/plugin.json; grep -q superlazy-brainstorm README.md'`
 
 ```json:metadata
-{"files": ["superlazy-cc/.claude-plugin/plugin.json", "README.md"], "modelTier": "standard", "verifyCommand": "full matrix per Verify", "acceptanceCriteria": ["1.6.0", "README three commands", "all suites green"], "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8]}
+{"files": ["superlazy-cc/.claude-plugin/plugin.json", "README.md"], "modelTier": "standard", "verifyCommand": "full matrix per Verify", "acceptanceCriteria": ["1.6.0", "README three commands", "all suites green", "Tasks 1-8 Verify commands re-executed at the barrier"], "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8]}
 ```
 
 ## Waves
