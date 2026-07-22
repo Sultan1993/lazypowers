@@ -142,6 +142,12 @@ check "8b stdout carries verdict verbatim" 'grep -q "^VERDICT: pass" out.txt'
 V "VERDICT: NEEDS-HUMAN" "whatever"
 echo "input" | bash "$SCRIPT" review > out.txt 2>err.txt
 check "8c review mode passes output through" 'grep -q "NEEDS-HUMAN" out.txt'
+# byte-identity: review output must equal the stub's bytes exactly, including
+# a missing trailing newline (command substitution would destroy this)
+printf '{"findings":[]}' > "$WS/verdict.txt"        # deliberately NO trailing \n
+echo "input" | bash "$SCRIPT" review > out.txt 2>err.txt
+check "8d review mode is byte-identical (no trailing-newline mangling)" 'cmp -s out.txt "$WS/verdict.txt"'
+V "${CLEAN[@]}"
 
 # --- case 11: model pinning ------------------------------------------------------------
 V "${CLEAN[@]}"

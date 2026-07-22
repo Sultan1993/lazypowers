@@ -183,19 +183,22 @@ Read whatever files, paths, or git ranges are referenced above to perform the
 review yourself. Do NOT modify any files. Output ONLY the VERDICT block in the
 exact format specified above — no preamble, no text after it."
 
-# Seam modes: pinned model. review/refute: env-selected model (empty → account default).
+# review/refute: BYTE-PERFECT pass-through via exec — no capture, no marker
+# logic (command substitution would strip trailing newlines; superlazy-review
+# consumes this output verbatim). Seam modes below capture instead, because
+# they must parse the verdict after printing it.
 # NOTE: --search is a TOP-LEVEL codex flag, so it goes BEFORE `exec`.
-if [ -n "$seam" ]; then
-  out="$(codex $SEARCH exec -s read-only -c model_reasoning_effort="$EFFORT" -m "$SEAM_MODEL" "$prompt")"
-elif [ -n "$MODEL" ]; then
-  out="$(codex $SEARCH exec -s read-only -c model_reasoning_effort="$EFFORT" -m "$MODEL" "$prompt")"
-else
-  out="$(codex $SEARCH exec -s read-only -c model_reasoning_effort="$EFFORT" "$prompt")"
+if [ -z "$seam" ]; then
+  if [ -n "$MODEL" ]; then
+    exec codex $SEARCH exec -s read-only -c model_reasoning_effort="$EFFORT" -m "$MODEL" "$prompt"
+  else
+    exec codex $SEARCH exec -s read-only -c model_reasoning_effort="$EFFORT" "$prompt"
+  fi
 fi
+
+out="$(codex $SEARCH exec -s read-only -c model_reasoning_effort="$EFFORT" -m "$SEAM_MODEL" "$prompt")"
 printf '%s\n' "$out"
 
-# review/refute: pass-through only, no marker logic — done.
-[ -n "$seam" ] || exit 0
 [ -n "${MARKER_DIR:-}" ] || exit 0
 
 # ---- clean check: exact pass token AND zero Critical/Important -------------------

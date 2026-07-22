@@ -2,9 +2,19 @@ Spec: docs/superpowers/specs/2026-07-22-superlazy-three-commands-design.md
 
 # superlazy-cc 1.6.0 — three-command restructure — implementation plan
 
-**Goal:** Implement the approved rev-6 spec: `superlazy-brainstorm` (new),
+**Goal:** Implement the approved spec: `superlazy-brainstorm` (new),
 `superlazy-build` (plan input + verify/re-bless), `superlazy-review` (Opus
 default), with hash-bearing approvals written only by `codex-critic.sh`.
+
+**Architecture:** coordinator-driven skills (no Workflow tool — its sandbox
+cannot run Codex); one bash wrapper (`codex-critic.sh`) is the sole
+approval-writer; one PreToolUse hook gates execution; pure-node lib for the
+plan visualization. **Tech stack:** bash + jq + python3 (fence parsing),
+node:test, no new dependencies. **User decisions honored:** Sol is the only
+critic; Fable authors via subagent; no user-override in brainstorm; effort
+policy high-first/medium-re-review. **Execution:** each task is executed by an
+agentic worker at its `modelTier`, commits its own scoped change, and runs its
+Verify command before completion.
 
 **Test policy:** every wave-1 task ships its own runnable check (stub-based
 shell tests or `node:test`); no task's tests depend on a sibling's files. The
@@ -61,8 +71,11 @@ tie-break = spec completeness), non-blank `verifyCommand`, non-empty
 **Goal:** Rewrite the wrapper per the interface contract; add stub-based tests.
 **Files:** Modify `superlazy-cc/scripts/codex-critic.sh`; create
 `superlazy-cc/tests/codex-critic.test.sh`, `superlazy-cc/tests/stubs/codex`
-**Steps:** (1) Keep review/refute byte-compatible on stdout (capture+print is
-fine; behavior identical). (2) Seam modes (`spec|plan|code`): pin
+**Steps:** (1) review/refute remain BYTE-PERFECT pass-through via `exec` — no
+capture (command substitution strips trailing newlines); regression test 8d
+compares output bytes via `cmp` against a stub payload with no trailing
+newline. Seam modes capture (they must parse after printing); trailing-newline
+normalization there is acceptable because only the VERDICT lines are parsed. (2) Seam modes (`spec|plan|code`): pin
 `-m gpt-5.6-sol`; self-invalidate first (spec → rm spec+plan markers + sidecar
 if PLAN_PATH known; plan → rm plan marker + sidecar; code → rm code marker);
 capture output (`out=$(codex ...)`), print verbatim; parse clean = pass token
@@ -86,7 +99,7 @@ effort/search propagation (case 11b).
 **Verify:** `bash superlazy-cc/tests/codex-critic.test.sh`
 
 ```json:metadata
-{"files": ["superlazy-cc/scripts/codex-critic.sh", "superlazy-cc/tests/codex-critic.test.sh", "superlazy-cc/tests/stubs/codex"], "modelTier": "standard", "verifyCommand": "bash superlazy-cc/tests/codex-critic.test.sh", "acceptanceCriteria": ["matrix cases 1-17 pass", "self-invalidation", "strict pass-token clean", "sidecar-then-marker order", "verify + --spec-only", "model pin for seam modes"]}
+{"files": ["superlazy-cc/scripts/codex-critic.sh", "superlazy-cc/tests/codex-critic.test.sh", "superlazy-cc/tests/stubs/codex"], "modelTier": "standard", "verifyCommand": "bash superlazy-cc/tests/codex-critic.test.sh", "acceptanceCriteria": ["matrix cases 1-17 + 8d byte-identity pass", "self-invalidation", "strict pass-token clean", "sidecar-then-marker order", "verify + --spec-only", "model pin for seam modes"]}
 ```
 
 ### Task 3: gate hook — hash validation
@@ -105,7 +118,7 @@ deny — approved-A/executed-B incl. filename-extension and both-paths cases). K
 Tests: crafted-stdin invocations (existing repo test pattern): spec cases
 18–22 (intact→allow; plan/tasks/spec byte flip→deny each; empty legacy→allow;
 corrupt JSON / missing field→deny; planPath= arg naming B / extending A's filename / missing → deny; exact A → allow).
-**Acceptance Criteria:** cases 18–21 pass; writing-plans arm untouched
+**Acceptance Criteria:** cases 18–22 pass (incl. planPath invocation binding); writing-plans arm untouched
 **Verify:** `bash superlazy-cc/tests/build-gate.test.sh`
 
 ```json:metadata
@@ -149,7 +162,7 @@ every Agent dispatch passes `model: <--claude-model or opus>` explicitly
 doc line updated. review-synth.mjs fallback `'sonnet'` → `'opus'`.
 **Acceptance Criteria:** no `model: sonnet` left in the two agents; SKILL
 always passes model; synth fallback opus; review-synth tests still green
-**Verify:** `! grep -l 'model: sonnet' superlazy-cc/agents/superlazy-review-critic.md superlazy-cc/agents/superlazy-refute-critic.md && grep -q "'opus'" superlazy-cc/skills/superlazy-review/lib/review-synth.mjs && node --test superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs`
+**Verify:** `bash -c 'set -e; for f in superlazy-cc/agents/superlazy-review-critic.md superlazy-cc/agents/superlazy-refute-critic.md; do grep -q "^model: opus" "$f"; done; grep -q "claudeModel:<--claude-model or \"opus\">" superlazy-cc/skills/superlazy-review/SKILL.md; grep -qc "model: <--claude-model or opus>" superlazy-cc/skills/superlazy-review/SKILL.md; grep -q "meta.claudeModel || .opus." superlazy-cc/skills/superlazy-review/lib/review-synth.mjs; node --test superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs >/dev/null'`
 
 ```json:metadata
 {"files": ["superlazy-cc/agents/superlazy-review-critic.md", "superlazy-cc/agents/superlazy-refute-critic.md", "superlazy-cc/skills/superlazy-review/SKILL.md", "superlazy-cc/skills/superlazy-review/lib/review-synth.mjs"], "modelTier": "mechanical", "verifyCommand": "greps + node --test review-synth.test.mjs", "acceptanceCriteria": ["frontmatters opus", "explicit model passing", "fallback opus", "existing tests green"]}
@@ -191,10 +204,10 @@ build, run left active. VERDICT parser section (pass token + counts;
 NEEDS-HUMAN → surface stderr + stop).
 **Acceptance Criteria:** all wiring greps below; no TaskCreate anywhere; no
 AskUserQuestion at the end
-**Verify:** `for a in 'superlazy-drafter' 'CLAUDE_CODE_SUBAGENT_MODEL' 'MARKER_DIR' 'SPEC_PATH' 'PLAN_PATH' 'plan-viz.mjs' '.done' '--continue' '--skip-critics' 'Spec:' 'CODEX_CRITIC_EFFORT'; do grep -q -- "$a" superlazy-cc/skills/superlazy-brainstorm/SKILL.md || echo "MISSING $a"; done; grep -c 'TaskCreate' superlazy-cc/skills/superlazy-brainstorm/SKILL.md | grep -qx 0 || echo 'HAS TaskCreate'`
+**Verify:** `bash -c 'set -e; f=superlazy-cc/skills/superlazy-brainstorm/SKILL.md; for a in superlazy-drafter CLAUDE_CODE_SUBAGENT_MODEL MARKER_DIR SPEC_PATH PLAN_PATH plan-viz .done -- --continue --skip-critics Spec: CODEX_CRITIC_EFFORT; do [ "$a" = -- ] && continue; grep -q -- "$a" "$f"; done; ! grep -qE "TaskCreate:|invoke TaskCreate|call TaskCreate" "$f"; ! grep -q "AskUserQuestion" "$f" || grep -q "never.*AskUserQuestion\|Never ask" "$f"'`
 
 ```json:metadata
-{"files": ["superlazy-cc/skills/superlazy-brainstorm/SKILL.md"], "modelTier": "standard", "verifyCommand": "wiring greps + zero TaskCreate", "acceptanceCriteria": ["preflight", "seam loops via MARKER_DIR", "hard stop + .done", "--continue + --skip-critics", "no TaskCreate/AskUserQuestion"], "blockedBy": [2, 4]}
+{"files": ["superlazy-cc/skills/superlazy-brainstorm/SKILL.md"], "modelTier": "standard", "verifyCommand": "wiring greps + zero TaskCreate", "acceptanceCriteria": ["preflight", "seam loops via MARKER_DIR", "hard stop + .done", "--continue + --skip-critics", "no TaskCreate/AskUserQuestion"]}
 ```
 
 ### Task 8: superlazy-build SKILL — plan input, verify, re-bless
@@ -216,10 +229,10 @@ parses + exact-matches it). Update VERDICT parser to
 pass-token semantics. Effort policy: first pass per seam high, re-reviews
 medium, user-exported `CODEX_CRITIC_EFFORT` wins.
 **Acceptance Criteria:** greps below; OVERRIDE prose gone; no TaskCreate
-**Verify:** `for a in 'verify' '--spec-only' '--spec' 'Spec:' 'superlazy-brainstorm' '--continue' 'slug' 'CODEX_CRITIC_EFFORT'; do grep -q -- "$a" superlazy-cc/skills/superlazy-build/SKILL.md || echo "MISSING $a"; done; grep -q 'OVERRIDE' superlazy-cc/skills/superlazy-build/SKILL.md && echo 'OVERRIDE still present'; grep -q 'seam-gate tasks' superlazy-cc/skills/superlazy-build/SKILL.md && echo 'tracker tasks still present'`
+**Verify:** `bash -c 'set -e; f=superlazy-cc/skills/superlazy-build/SKILL.md; for a in verify spec-only planPath= Spec: superlazy-brainstorm continue slug CODEX_CRITIC_EFFORT skip-critics; do grep -q -- "$a" "$f"; done; ! grep -q OVERRIDE "$f"; ! grep -q "seam-gate tasks" "$f"; ! grep -qE "TaskCreate:|invoke TaskCreate|call TaskCreate" "$f"'`
 
 ```json:metadata
-{"files": ["superlazy-cc/skills/superlazy-build/SKILL.md"], "modelTier": "standard", "verifyCommand": "wiring greps + OVERRIDE/tracker absence", "acceptanceCriteria": ["trust ladder + announce", "verify/re-bless wiring", "brainstorm delegation", "no OVERRIDE prose", "no TaskCreate", "run lifecycle rules"], "blockedBy": [2, 3, 7]}
+{"files": ["superlazy-cc/skills/superlazy-build/SKILL.md"], "modelTier": "standard", "verifyCommand": "wiring greps + OVERRIDE/tracker absence", "acceptanceCriteria": ["trust ladder + announce", "verify/re-bless wiring", "brainstorm delegation", "no OVERRIDE prose", "no TaskCreate", "run lifecycle rules"]}
 ```
 
 ### Task 9: integration — version, README, full matrix
@@ -232,16 +245,24 @@ Then run EVERYTHING: both shell test suites, both node:test suites, all static
 grep assertions from the spec's matrix (drafter frontmatter, opus agents,
 SKILL wiring, no-TaskCreate in both new SKILLs).
 **Acceptance Criteria:** all suites green; version 1.6.0; README covers three commands
-**Verify:** `bash superlazy-cc/tests/codex-critic.test.sh && bash superlazy-cc/tests/build-gate.test.sh && node --test superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.test.mjs superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs && grep -q '"1.6.0"' superlazy-cc/.claude-plugin/plugin.json && grep -q 'superlazy-brainstorm' README.md`
+**Verify:** `bash -c 'set -e; bash superlazy-cc/tests/codex-critic.test.sh >/dev/null; bash superlazy-cc/tests/build-gate.test.sh >/dev/null; node --test superlazy-cc/skills/superlazy-brainstorm/lib/plan-viz.test.mjs superlazy-cc/skills/superlazy-review/lib/review-synth.test.mjs >/dev/null; grep -q "\"version\": \"1.6.0\"" superlazy-cc/.claude-plugin/plugin.json; grep -q superlazy-brainstorm README.md; grep -q "model: fable" superlazy-cc/agents/superlazy-drafter.md; grep -q "^model: opus" superlazy-cc/agents/superlazy-review-critic.md; grep -q "^model: opus" superlazy-cc/agents/superlazy-refute-critic.md; grep -qi "tier" superlazy-cc/agents/superlazy-plan-critic.md'`
 
 ```json:metadata
-{"files": ["superlazy-cc/.claude-plugin/plugin.json", "README.md"], "modelTier": "mechanical", "verifyCommand": "full matrix per Verify", "acceptanceCriteria": ["1.6.0", "README three commands", "all suites green"], "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8]}
+{"files": ["superlazy-cc/.claude-plugin/plugin.json", "README.md"], "modelTier": "standard", "verifyCommand": "full matrix per Verify", "acceptanceCriteria": ["1.6.0", "README three commands", "all suites green"], "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8]}
 ```
 
 ## Waves
-- Wave 1 (parallel, file-disjoint): T1, T2, T3, T4, T5, T6
-- Wave 2: T7 (after T2/T4), T8 (after T2/T3/T7 — build references brainstorm)
-- Wave 3 (barrier): T9
+- Wave 1 (parallel, file-disjoint): T1–T8 — every cross-task name they
+  reference (script env/modes, marker filenames, plan-viz CLI, planPath=
+  token) is pinned in the contracts header, so they write blind.
+- Wave 2 (barrier): T9 — integration, full matrix, version, README.
+
+## Commit policy (I3, partial)
+Each task commits its own scoped change (`git add <task files> && git commit`)
+after its Verify command passes. Tests are written alongside the code they
+verify (test files are listed in each task's Files); red/green detail beyond
+that is deliberately not restated here — the Verify commands are the
+executable acceptance layer.
 
 ## Out of scope (post-plan, user-gated)
 Push, plugin publish, and the 7-branch e2e run — they require the published
